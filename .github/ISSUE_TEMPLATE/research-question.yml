@@ -1,0 +1,19 @@
+name: Research question
+description: Capture a testable question that emerged from reading.
+title: "[Question] "
+labels: [idea]
+body:
+  - type: textarea
+    id: trigger
+    attributes:
+      label: Trigger and evidence
+      description: Which paper, result, or conflict produced this question?
+    validations:
+      required: true
+  - type: textarea
+    id: hypothesis
+    attributes:
+      label: Hypothesis and falsification
+      description: State the hypothesis and what evidence would show it is wrong.
+    validations:
+      required: true

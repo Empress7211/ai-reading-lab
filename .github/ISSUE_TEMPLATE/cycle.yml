@@ -1,0 +1,34 @@
+name: Reading cycle
+description: Track a complete reading cycle and its weekly outcomes.
+title: "[Cycle] "
+labels: [cycle, reading]
+body:
+  - type: input
+    id: question
+    attributes:
+      label: Core question
+      description: One answerable question, not a broad topic.
+    validations:
+      required: true
+  - type: textarea
+    id: outputs
+    attributes:
+      label: Required outputs
+      value: |
+        - [ ] W01
+        - [ ] W02
+        - [ ] W03
+        - [ ] W04
+        - [ ] W05
+        - [ ] W06
+        - [ ] W07
+        - [ ] W08
+        - [ ] W09
+        - [ ] W10
+        - [ ] W11
+        - [ ] W12
+        - [ ] Concept notes
+        - [ ] Knowledge map
+        - [ ] Cycle synthesis and review
+    validations:
+      required: true

@@ -1,0 +1,15 @@
+project: "AI Reading Lab"
+repository: "Empress7211/ai-reading-lab"
+timezone: "Asia/Singapore"
+active_cycle: "2026-C01"
+active_cycle_dir: "cycles/2026-C01-agent-post-training"
+cycle_start: "2026-08-04"
+cycle_end: "2026-10-25"
+weekly_hours: "5-6"
+week_ends_on: "Sunday"
+statuses: ["queued", "reading", "read", "synthesized", "revisit", "archived"]
+depths: ["scan", "normal", "deep"]
+review_intervals_days: [1, 7, 30, 90]
+deep_reading_wip_limit: 1
+deep_queue_limit: 3
+max_file_bytes: 5242880
