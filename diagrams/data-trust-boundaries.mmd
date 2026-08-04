@@ -1,0 +1,29 @@
+flowchart LR
+    subgraph Trusted[Trusted control plane]
+        Policy[System policies]
+        UserAction[Explicit user action]
+        Validator[Schema / domain / permission validator]
+        Executor[Zotero / Git / file executor]
+    end
+
+    subgraph Untrusted[Untrusted data plane]
+        PDF[PDF text and embedded content]
+        Metadata[External metadata and citation contexts]
+        Repo[Imported Git / Markdown content]
+        Model[Model output]
+    end
+
+    PDF --> Prompt[Prompt context builder]
+    Metadata --> Prompt
+    Repo --> Prompt
+    Policy --> Prompt
+    UserAction --> Prompt
+    Prompt --> Model
+    Model --> Proposal[Structured proposed objects/actions]
+    Proposal --> Validator
+    Policy --> Validator
+    UserAction --> Validator
+    Validator -->|valid note draft| Review[Human Review Queue]
+    Validator -->|approved external action| Executor
+    Review -->|accept / edit| Knowledge[(Verified Local Knowledge)]
+    Review -->|reject| Discard[Rejected / audit only]

@@ -1,0 +1,25 @@
+stateDiagram-v2
+    [*] --> EvidenceCreated: user selects text / figure / table
+    EvidenceCreated --> DraftGenerating: analyze selection or section
+    DraftGenerating --> ValidationFailed: schema / anchor / numeric check fails
+    ValidationFailed --> DraftGenerating: retry or switch model
+    ValidationFailed --> ManualOnly: user continues without AI
+
+    DraftGenerating --> Draft: validated AI proposal
+    Draft --> Accepted: user accepts
+    Draft --> Edited: user edits and accepts
+    Draft --> Rejected: user rejects
+
+    Accepted --> Verified
+    Edited --> Verified
+    Verified --> Reused: search / synthesis / export / link
+    Reused --> Verified
+
+    Verified --> Stale: PDF version, parser or evidence changed
+    Stale --> Verified: user revalidates / anchor relocates
+    Stale --> Archived: no longer applicable
+
+    Rejected --> [*]
+    Archived --> [*]
+    ManualOnly --> UserNote
+    UserNote --> Verified: user marks structured knowledge

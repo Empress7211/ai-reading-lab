@@ -1,0 +1,180 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://paperweave.local/schemas/topic-pack.schema.json",
+  "title": "PaperWeave Balanced Reading Pack",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "pack_id", "topic", "generation", "items", "coverage", "warnings"],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "pack_id": { "$ref": "#/$defs/uuid" },
+    "topic": { "$ref": "#/$defs/topicIntent" },
+    "generation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["generated_at", "algorithm_version", "candidate_count", "provider_snapshot", "user_constraints"],
+      "properties": {
+        "generated_at": { "type": "string", "format": "date-time" },
+        "algorithm_version": { "type": "string", "minLength": 1, "maxLength": 100 },
+        "candidate_count": { "type": "integer", "minimum": 0 },
+        "provider_snapshot": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["provider", "status"],
+            "properties": {
+              "provider": { "type": "string", "maxLength": 80 },
+              "status": { "type": "string", "enum": ["ok", "partial", "unavailable", "disabled"] },
+              "retrieved_at": { "type": ["string", "null"], "format": "date-time" },
+              "warning": { "type": ["string", "null"], "maxLength": 500 }
+            }
+          }
+        },
+        "user_constraints": { "type": "object" }
+      }
+    },
+    "items": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 30,
+      "items": { "$ref": "#/$defs/packItem" }
+    },
+    "coverage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["subtopics", "role_counts", "oa_ratio", "known_gaps"],
+      "properties": {
+        "subtopics": { "type": "array", "items": { "type": "string", "maxLength": 200 }, "uniqueItems": true },
+        "role_counts": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["foundation", "frontier", "counterpoint", "bridge", "resource"],
+          "properties": {
+            "foundation": { "type": "integer", "minimum": 0 },
+            "frontier": { "type": "integer", "minimum": 0 },
+            "counterpoint": { "type": "integer", "minimum": 0 },
+            "bridge": { "type": "integer", "minimum": 0 },
+            "resource": { "type": "integer", "minimum": 0 }
+          }
+        },
+        "oa_ratio": { "type": "number", "minimum": 0, "maximum": 1 },
+        "known_gaps": { "type": "array", "maxItems": 20, "items": { "type": "string", "maxLength": 500 } }
+      }
+    },
+    "warnings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["code", "message", "severity"],
+        "properties": {
+          "code": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]{2,63}$" },
+          "message": { "type": "string", "maxLength": 1000 },
+          "severity": { "type": "string", "enum": ["info", "warning", "blocking"] }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "uuid": { "type": "string", "format": "uuid" },
+    "topicIntent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["canonical_query", "display_name", "concepts", "inclusion_terms", "exclusion_terms", "question_type", "desired_roles", "assumptions"],
+      "properties": {
+        "canonical_query": { "type": "string", "minLength": 2, "maxLength": 500 },
+        "display_name": { "type": "string", "minLength": 2, "maxLength": 200 },
+        "description": { "type": "string", "maxLength": 2000 },
+        "concepts": { "type": "array", "items": { "type": "string", "maxLength": 120 }, "uniqueItems": true },
+        "aliases": { "type": "array", "items": { "type": "string", "maxLength": 120 }, "uniqueItems": true },
+        "inclusion_terms": { "type": "array", "items": { "type": "string", "maxLength": 120 }, "uniqueItems": true },
+        "exclusion_terms": { "type": "array", "items": { "type": "string", "maxLength": 120 }, "uniqueItems": true },
+        "target_domains": { "type": "array", "items": { "type": "string", "maxLength": 120 }, "uniqueItems": true },
+        "question_type": {
+          "type": "string",
+          "enum": ["conceptual_overview", "method_evolution", "empirical_controversy", "reproduction_assessment", "benchmark_landscape", "systematic_review_prework", "other"]
+        },
+        "desired_roles": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/role" },
+          "uniqueItems": true
+        },
+        "time_range": {
+          "type": ["object", "null"],
+          "additionalProperties": false,
+          "properties": {
+            "from_year": { "type": ["integer", "null"], "minimum": 1600, "maximum": 2200 },
+            "to_year": { "type": ["integer", "null"], "minimum": 1600, "maximum": 2200 }
+          }
+        },
+        "assumptions": { "type": "array", "items": { "type": "string", "maxLength": 500 }, "maxItems": 20 }
+      }
+    },
+    "role": {
+      "type": "string",
+      "enum": ["foundation", "frontier", "counterpoint", "bridge", "resource"]
+    },
+    "rationale": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["text", "evidence_type", "confidence"],
+      "properties": {
+        "text": { "type": "string", "minLength": 1, "maxLength": 1000 },
+        "evidence_type": {
+          "type": "string",
+          "enum": ["semantic_relevance", "citation_graph", "shared_ancestor", "citation_velocity", "citation_context", "methodological_critique", "replication_signal", "negative_result", "user_library", "llm_classification", "manual"]
+        },
+        "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+        "source_refs": { "type": "array", "items": { "type": "string", "maxLength": 500 }, "maxItems": 20 }
+      }
+    },
+    "packItem": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["item_id", "paper_id", "title", "year", "authors", "role", "role_confidence", "rank", "reading_mode", "rationales", "relations", "access", "selection_source"],
+      "properties": {
+        "item_id": { "$ref": "#/$defs/uuid" },
+        "paper_id": { "$ref": "#/$defs/uuid" },
+        "title": { "type": "string", "minLength": 1, "maxLength": 1000 },
+        "year": { "type": ["integer", "null"], "minimum": 1600, "maximum": 2200 },
+        "authors": { "type": "array", "minItems": 1, "maxItems": 100, "items": { "type": "string", "maxLength": 300 } },
+        "identifiers": { "type": "object", "additionalProperties": { "type": "string" } },
+        "role": { "$ref": "#/$defs/role" },
+        "secondary_roles": { "type": "array", "items": { "$ref": "#/$defs/role" }, "uniqueItems": true },
+        "role_confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+        "rank": { "type": "integer", "minimum": 1 },
+        "reading_mode": { "type": "string", "enum": ["skim", "deep_read", "verify", "reference"] },
+        "rationales": { "type": "array", "minItems": 1, "maxItems": 8, "items": { "$ref": "#/$defs/rationale" } },
+        "relations": {
+          "type": "array",
+          "maxItems": 30,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["target_item_id", "relation_type", "confidence"],
+            "properties": {
+              "target_item_id": { "$ref": "#/$defs/uuid" },
+              "relation_type": { "type": "string", "enum": ["prerequisite", "extends", "counters", "bridges", "replicates", "compares"] },
+              "confidence": { "type": "number", "minimum": 0, "maximum": 1 }
+            }
+          }
+        },
+        "access": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["zotero_state", "pdf_state", "oa_state"],
+          "properties": {
+            "zotero_state": { "type": "string", "enum": ["present_with_pdf", "present_no_pdf", "not_present", "unknown"] },
+            "pdf_state": { "type": "string", "enum": ["local", "resolvable_oa", "manual_access_required", "unavailable", "unknown"] },
+            "oa_state": { "type": "string", "enum": ["open_license", "accessible_license_unknown", "closed", "unknown"] },
+            "preferred_version": { "type": ["string", "null"], "enum": ["submitted", "accepted", "published", "unknown", null] }
+          }
+        },
+        "selection_source": { "type": "string", "enum": ["algorithm", "user_pinned", "user_replaced", "manual"] },
+        "user_feedback": { "type": ["string", "null"], "enum": ["relevant", "irrelevant", "outdated", "duplicate", "role_wrong", "already_read", null] }
+      }
+    }
+  }
+}

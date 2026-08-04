@@ -1,80 +1,94 @@
-# AI Reading Lab
+# PaperWeave（论织）产品交付包 v0.1
 
-一个面向 AI 算法工程师的长期论文阅读与知识综合仓库。这里保存可审阅、可演化的个人知识；论文元数据、附件和 PDF 由 Zotero 管理。
+> 版本日期：2026-08-04  
+> 状态：产品定义与交互验证版（可进入技术评审、视觉设计和 MVP 拆解）  
+> 工作名称：PaperWeave / 论织（未进行商标与域名核验，不作为最终品牌名）
 
-当前周期：[`2026-C01 · Agent & Post-Training`](cycles/2026-C01-agent-post-training/PLAN.md)
-自动概览：[`DASHBOARD.md`](DASHBOARD.md)
-长期目标：[`PROJECT_CHARTER.md`](PROJECT_CHARTER.md)
+## 1. 产品一句话
 
-## 十分钟上手
+PaperWeave 是一个 **Local-first、证据可追溯、面向深度论文阅读的研究工作台**：它为一个主题生成兼顾“基石—当前发展—反方视角”的阅读路径，在阅读过程中把 AI 输出约束为可审阅、可定位到原文、可跨论文复用的研究笔记，并与本地 Zotero 和 Git 仓库联动。
 
-1. 让 Codex 推荐或收集论文；实际推荐的论文会自动进入 Zotero `AI Reading Lab/00 Inbox`，并自动尝试保存 PDF。
-2. 周结时决定下周论文；新热点先留在 `90 Frontier-Watch`，不在周中改主线。
-3. 将进入阅读队列的论文固定 Better BibTeX citation key，并确认它已出现在 `references/library.bib`。
-4. 创建笔记：`python3 scripts/lab.py new-paper <citekey>`，补齐 Zotero item key 后开始阅读。
-5. 按模板用自己的话写中文摘要和英文 Summary；精读必须记录假设、证据、局限和连接。
-6. 周日前填写当前周结，依次运行生成、校验和测试命令，再以 `read:` 或 `synth:` 前缀提交。
+## 2. 本交付包包含什么
 
-## 稳定命令
+| 文件 | 用途 |
+|---|---|
+| `01_Product_Strategy.md` | 产品定位、目标用户、核心价值、边界与商业假设 |
+| `02_PRD.md` | 完整产品需求、用户故事、功能规格与验收口径 |
+| `03_AI_Notes_System.md` | 核心差异化：AI 笔记、证据账本、审阅与跨论文综合 |
+| `04_Recommendation_Engine.md` | “基石 / 前沿 / 反方”论文推荐与解释算法 |
+| `05_Zotero_Git_Integration.md` | Zotero、Git/GitHub、PDF 获取与同步策略 |
+| `06_Technical_Architecture.md` | 桌面端、本地核心、云元数据服务、模型适配层架构 |
+| `07_Data_Model_and_API.md` | 领域模型、状态机、内部 API 和文件结构 |
+| `08_UX_IA_and_Flows.md` | 信息架构、关键页面、阅读器交互、快捷键与无障碍 |
+| `09_Analytics_and_Evaluation.md` | 北极星指标、埋点、推荐/笔记质量评测与实验框架 |
+| `10_Security_Legal_and_Risk.md` | 隐私、安全、版权、提示注入和风险清单 |
+| `11_Roadmap_and_Acceptance.md` | MVP 范围、发布门槛、后续阶段与开发拆分 |
+| `12_Competitive_Landscape.md` | 当前产品格局、可借鉴能力和差异化楔子 |
+| `13_Decisions_and_Open_Questions.md` | 已做决策、假设和下一轮需要验证的问题 |
+| `schemas/` | AI 输出与本地持久化的 JSON Schema |
+| `prompts/` | 可直接用于模型适配层的提示词契约 |
+| `diagrams/` | Mermaid 架构图、用户流和笔记生命周期 |
+| `prototype/index.html` | 单文件交互原型，覆盖发现、主题包、阅读器、AI 笔记和同步 |
+| `prototype/QA_REPORT.json` | 桌面端与移动端浏览器级回归结果 |
+| `prototype/screenshots/` | 发现页、阅读器、证据审阅、同步预览与移动端截图 |
+| `MANIFEST.json` | 文件清单、体积与 SHA-256 校验值 |
+
+## 3. 推荐的产品形态
+
+首版建议为 **Tauri 桌面应用（macOS 优先，Windows/Linux 随架构兼容）＋轻量云端元数据服务**：
+
+- PDF、批注、完整笔记、模型密钥默认留在本机；
+- 桌面端直接访问本地 Zotero、文件系统与 Git；
+- 云端仅承担论文元数据聚合、引用图缓存、主题包候选召回和可选账户同步；
+- 用户自行配置 LLM API，也可选择本地模型；
+- 后续再提供 Web 协作端与移动阅读端。
+
+## 4. MVP 的核心闭环
+
+1. 用户输入一个主题或选择系统推荐主题。
+2. 系统生成一个有解释的平衡阅读包：基石、当前发展、反方视角，必要时补充综述/桥梁论文。
+3. 用户选择论文；系统优先解析开放获取来源，合法获取 PDF，并写入本地 Zotero。
+4. 用户在三栏阅读器中阅读、划线、提问；AI 逐步生成带页码和坐标锚点的笔记草稿。
+5. 用户对 AI 笔记逐条“接受 / 编辑 / 驳回”；只有通过审阅的内容进入正式知识库。
+6. 结构化笔记写入本地数据库，并导出为 Markdown 到 Git 仓库；Zotero 保存条目、附件、精简笔记与反向链接。
+7. 多篇论文阅读后，系统生成观点分歧矩阵、方法演化和下一步阅读建议。
+
+## 5. 原型使用方法
+
+直接双击 `prototype/index.html` 即可使用。为避免某些浏览器对本地脚本的限制，也可以在本目录运行：
 
 ```bash
-python3 scripts/lab.py new-paper ouyang_training_2022
-python3 scripts/lab.py new-week 2
-python3 scripts/lab.py build
-python3 scripts/lab.py check
-python3 -m unittest discover -s tests -v
+python3 -m http.server 8000
 ```
 
-`new-paper` 会生成带 `TODO` Zotero key 的草稿；在补成真实的 8 位 Zotero item key、且对应 citekey 已进入 BibTeX 前，`check` 会有意失败。
+然后在浏览器中打开 `http://localhost:8000/prototype/`。
 
-## 智能收集默认行为
+原型使用演示数据，不会请求网络、读取 Zotero、调用模型或修改 Git 仓库。
 
-本项目把 Codex 作为阅读流程的协调器。每当用户要求推荐、收藏或纳入阅读队列时，Codex 默认完成：
+## 6. 验证状态
 
-```text
-检索与筛选 → Zotero 全库去重 → 收入 AI Reading Lab
-            → 自动查找合法可用 PDF → 验证附件
-            → Better BibTeX 自动导出 → 创建/更新笔记
-            → build + check + test → 小粒度提交并推送
-```
+原型已完成静态解析、JavaScript 语法、JSON Schema 与浏览器交互回归：
 
-- “找到”指最终实际推荐给用户或用户明确选择的论文，不包含检索过程中被淘汰的候选。
-- 新候选默认进入 `00 Inbox`；热点观察进入 `90 Frontier-Watch`；确定阅读后才进入主题集合和 Git 笔记。
-- 优先使用 DOI、arXiv、OpenReview 或出版方官方页面保存；不从未知镜像下载，不绕过付费墙或验证码。
-- PDF 获取失败不会阻塞元数据入库，但必须明确报告失败原因；Git 中始终看不到 PDF，因为文件只由 Zotero 管理。
-- Better BibTeX 的“不导出的字段”设置包含 `file`，防止公开 BibTeX 泄露本机 Zotero 附件路径。
+- Chromium 桌面视口：`1440 × 1000`；
+- 移动视口：`390 × 844`；
+- 已覆盖发现页角色数量、三栏阅读器、Claim 接受流程、同步预览、主导航、命令面板、横向溢出与运行时错误；
+- 详细结果见 `prototype/QA_REPORT.json`，参考画面见 `prototype/screenshots/`。
 
-## 信息边界
+## 7. 当前明确不做
 
-| 内容 | 唯一事实来源 |
-|---|---|
-| 论文标题、作者、出版信息、PDF、附件 | Zotero |
-| citation key 与 BibTeX 导出 | Better BibTeX → `references/library.bib` |
-| 阅读状态、个人理解、概念连接 | 本仓库 Markdown |
-| 当前阅读主线和周计划 | `cycles/` |
-| 研究想法和选择性复现 | `ideas/`、`reproductions/`、GitHub Issues |
+- 不绕过付费墙、登录或机构访问控制；
+- 不把“一键生成整篇总结”作为核心体验；
+- 不在 MVP 中做多人实时协作、论文写作代笔或投稿管理；
+- 不默认把 PDF 上传到 PaperWeave 云端；
+- 不将 GitHub 设为唯一笔记后端：底层抽象为本地 Git 仓库，GitHub 只是首个远端适配器；
+- 不让未经用户审阅的 AI 草稿自动成为“事实”。
 
-Zotero item key（例如 `PXW99EKT`）用于定位 Zotero 条目；BibTeX citation key（例如 `ouyang_training_2022`）用于笔记文件名和引用。二者不可混用。
+## 8. 本版最重要的产品判断
 
-## 工作节奏
+PaperWeave 的壁垒不应是“模型回答得更长”，而应是：
 
-每周投入 5–6 小时：筛选与回忆 30 分钟、首读 90 分钟、精读 120 分钟、脱稿总结 60 分钟、概念连接与周结 60 分钟。首周用于系统初始化，末周用于周期综合。
-
-复现不是默认任务。只有当关键结论无法仅靠阅读判断时才建立 `reproduction` Issue，单周最多投入一小时。
-
-## 仓库规则
-
-- 本仓库为 public；笔记不得包含私人信息、公司内部资料、密钥、未授权全文或本机绝对路径。
-- 任一时刻最多一篇论文处于 `reading`，精读队列最多三篇。
-- 摘要必须自行复述，禁止复制论文 Abstract 充当笔记。
-- 任何付费 API、主题切换或治理规则变更，都必须得到明确授权并记录决策。
-- GitHub Actions 只校验，不写回仓库，也不调用 Zotero 或模型 API。
-- 详细约束见 [`AGENTS.md`](AGENTS.md) 和 [`PROJECT_CHARTER.md`](PROJECT_CHARTER.md)。
-
-## Zotero 首次配置
-
-1. 启用 Zotero Local API 并确认 `http://127.0.0.1:23119` 可读。
-2. 安装 Better BibTeX。
-3. 创建 `AI Reading Lab` 及约定子集合。
-4. 对顶层集合启用递归、Keep Updated 的 Better BibTeX 导出，目标为本仓库 `references/library.bib`。
-5. 导入首周期论文后固定 citation key，并运行 `python3 scripts/lab.py check` 验证引用链路。
+- **平衡阅读路径**：推荐的是观点结构，不只是相似论文列表；
+- **证据账本**：每条结论都能回到页、段、图、表或公式；
+- **人机共写协议**：AI 草稿与用户判断永久区分，并保留审阅痕迹；
+- **跨论文认知演化**：最终产物不是多份摘要，而是用户研究观点如何被支持、修正或推翻；
+- **工具链不劫持**：Zotero 继续管理文献，Git 继续管理可迁移知识，产品负责把两者连成研究闭环。

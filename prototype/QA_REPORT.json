@@ -1,0 +1,18 @@
+{
+  "tested_at_utc": "2026-08-04T12:35:27Z",
+  "renderer": "Chromium 144 via CDP Page.setDocumentContent (environment policy blocks file:// and localhost navigation)",
+  "desktop_viewport": "1440x1000",
+  "mobile_viewport": "390x844",
+  "checks": [
+    "discover role counts and navigation",
+    "paper reader three-pane layout and two synthetic PDF pages",
+    "evidence-ledger accept workflow and verified count",
+    "Zotero/Git sync preview modal",
+    "knowledge, sync, settings, discover navigation",
+    "Cmd+K command palette",
+    "desktop/mobile horizontal overflow",
+    "runtime and browser log errors"
+  ],
+  "result": "pass",
+  "known_environment_constraint": "The managed Chromium used for QA blocks direct file:// and 127.0.0.1 navigation. The single-file artifact was injected as the exact HTML document for rendering; static parsing and JavaScript syntax were checked separately."
+}

@@ -1,0 +1,190 @@
+{
+  "package": "PaperWeave_Product_Package",
+  "version": "0.1",
+  "generated_date": "2026-08-04",
+  "working_product_name": "PaperWeave / 论织",
+  "file_count_excluding_manifest": 36,
+  "total_bytes_excluding_manifest": 1344388,
+  "files": [
+    {
+      "path": "01_Product_Strategy.md",
+      "bytes": 7908,
+      "sha256": "6a46b6642d484a192d60c5a0deacdc65ef80697061fd097cc20a1eccc8890fee"
+    },
+    {
+      "path": "02_PRD.md",
+      "bytes": 16323,
+      "sha256": "f0918cd35c1ce6d88e744b7cab626b704741135cb2c028b78b2368bbdade6c01"
+    },
+    {
+      "path": "03_AI_Notes_System.md",
+      "bytes": 13053,
+      "sha256": "5a748f11b8ca8c3f6b0fbf33dca01fe029372ec5472ccc459565ad885e9294b6"
+    },
+    {
+      "path": "04_Recommendation_Engine.md",
+      "bytes": 10861,
+      "sha256": "d48abb6fe3528b493c5f962aff2344939529f3ed37cc3e3946bf5b3170f05deb"
+    },
+    {
+      "path": "05_Zotero_Git_Integration.md",
+      "bytes": 10815,
+      "sha256": "76b48e1f9aeecd9c747468043ccc20f704bdcb9aedcfa9959010c5bb4c1ef6d9"
+    },
+    {
+      "path": "06_Technical_Architecture.md",
+      "bytes": 11492,
+      "sha256": "84146f0ed5f6372f8aed6eb3a19cb07347a6e6079b549eb7c423f7d4443a9c68"
+    },
+    {
+      "path": "07_Data_Model_and_API.md",
+      "bytes": 11624,
+      "sha256": "db84512018b31ed40f31d69b4a06381bdb1f61712dcb1778fc2ba3e8c9ec905c"
+    },
+    {
+      "path": "08_UX_IA_and_Flows.md",
+      "bytes": 11826,
+      "sha256": "54d295f97b457e10dd8109da3944391ed9b51fd67fad2c00ac97326dc0822b0e"
+    },
+    {
+      "path": "09_Analytics_and_Evaluation.md",
+      "bytes": 9770,
+      "sha256": "df245f325a3d22326e80801d46be84823ae9d9b5268b73bc5f7a19f48077834f"
+    },
+    {
+      "path": "10_Security_Legal_and_Risk.md",
+      "bytes": 11320,
+      "sha256": "cd38f040b830c262d1b9db3287f01382296176d53978c3e8cc62f64d0f5998de"
+    },
+    {
+      "path": "11_Roadmap_and_Acceptance.md",
+      "bytes": 10758,
+      "sha256": "fb081d5e44e022aa2573ab06462bf86f2f01f5044a5d617bcf917b1c6f764c93"
+    },
+    {
+      "path": "12_Competitive_Landscape.md",
+      "bytes": 8972,
+      "sha256": "07012d00ed4a151c6509b3767aedd8d28206819d48c4786fb8e77297b2c0f188"
+    },
+    {
+      "path": "13_Decisions_and_Open_Questions.md",
+      "bytes": 9443,
+      "sha256": "2b9443241614883e6780a6797658a74928e69e08034f1d7504fe7ffc8893a13a"
+    },
+    {
+      "path": "README.md",
+      "bytes": 5658,
+      "sha256": "160f922de39dd64845e04a17bb6144ab9f70cf580e774139927759c3bb29592e"
+    },
+    {
+      "path": "SOURCES.md",
+      "bytes": 4583,
+      "sha256": "8406dfd99a2f51de42ecbebd5afb7931ce7513b554fb61a48f01a0475321ec0b"
+    },
+    {
+      "path": "diagrams/core-user-flow.mmd",
+      "bytes": 1268,
+      "sha256": "c9f4bba30553d14555b5093cde802881e9e77e20977024425ad3fdeea0c11d1b"
+    },
+    {
+      "path": "diagrams/data-trust-boundaries.mmd",
+      "bytes": 1008,
+      "sha256": "cfd9a22c6aa88c6cbc10a62fb478edbbb63c1efbb3d5ab66c0203e42e860710b"
+    },
+    {
+      "path": "diagrams/note-lifecycle.mmd",
+      "bytes": 965,
+      "sha256": "c231ce175f9a5f184fb4e525c1a000072598bb018e9b86053ad9090433508fb6"
+    },
+    {
+      "path": "diagrams/system-architecture.mmd",
+      "bytes": 2009,
+      "sha256": "1f850efd1e23c6c046351508ec43435aa8c9c49e705ab185cfc2aca9bda05796"
+    },
+    {
+      "path": "prompts/README.md",
+      "bytes": 727,
+      "sha256": "6f1dc84300caa34e634540144450cb374f08fe7eeb90a714356fb6778d71864e"
+    },
+    {
+      "path": "prompts/claim_extraction.md",
+      "bytes": 2932,
+      "sha256": "889a7505e92c5eb24b9b3026dadd1812ce9ab72c368cf3aa70fbbaaba20eb8bf"
+    },
+    {
+      "path": "prompts/counterpoint_analysis.md",
+      "bytes": 3247,
+      "sha256": "655e1fbcce63fcbae4d351482535f616a14a4bff996f26f3452e0a97e6358267"
+    },
+    {
+      "path": "prompts/cross_paper_synthesis.md",
+      "bytes": 3098,
+      "sha256": "9baa9a8f2ad69b81197d4d6a0e4d35cf7c71f39cb501ffa2bed9a9251ec1ddb0"
+    },
+    {
+      "path": "prompts/post_reading_synthesis.md",
+      "bytes": 2739,
+      "sha256": "f3413bf963b064477ac858341fced2429e123f173b7d8849fcad4e4e64dfca78"
+    },
+    {
+      "path": "prompts/reading_guide.md",
+      "bytes": 2965,
+      "sha256": "74895369ec083ed762bb91a8280bffa84a9c4e144f60a63403ef5cac43c76d8e"
+    },
+    {
+      "path": "prototype/QA_REPORT.json",
+      "bytes": 901,
+      "sha256": "6d1b0f8e415919a10c30ee8be3a96483981f2d2cf8e8d48cdc01e2d08f437839"
+    },
+    {
+      "path": "prototype/README.md",
+      "bytes": 1830,
+      "sha256": "8ef2615babb132d01a0ab4e05abde13894c00b0396a0a6605b192cf711ffaf96"
+    },
+    {
+      "path": "prototype/index.html",
+      "bytes": 124002,
+      "sha256": "8cc7b1cc34cb8a7619f166da0f1650e1cd63e7c1a194576239b4d1e7c8b0f72b"
+    },
+    {
+      "path": "prototype/screenshots/discover-mobile.png",
+      "bytes": 102553,
+      "sha256": "9083c0fef4fbd02218f6f96c0c7d72f23ff0ca71c3d90569628b24d29532feee"
+    },
+    {
+      "path": "prototype/screenshots/discover.png",
+      "bytes": 248394,
+      "sha256": "3de86506eed977876bad046babb25eb79ecc6f6689787bf367509bacb16818e1"
+    },
+    {
+      "path": "prototype/screenshots/ledger-reviewed.png",
+      "bytes": 231582,
+      "sha256": "2d5743a403911b2337fcb60b8fa92f66020f0c38ad99da07a7f5b8591b21839d"
+    },
+    {
+      "path": "prototype/screenshots/reader.png",
+      "bytes": 219627,
+      "sha256": "0583dc8100a0939579a40a3967d38a6a5b1ac72e740715653d49dd00c038df7b"
+    },
+    {
+      "path": "prototype/screenshots/sync-preview.png",
+      "bytes": 216641,
+      "sha256": "3fbd5cc6914b25821fb784137eb212f6a34bac5410b69264834f8d9300c654ac"
+    },
+    {
+      "path": "schemas/model-profile.schema.json",
+      "bytes": 4224,
+      "sha256": "95ff3b5404513046803883a117b2ccaa3062d2805b1f32fdd50d956777c8d2c9"
+    },
+    {
+      "path": "schemas/note.schema.json",
+      "bytes": 10427,
+      "sha256": "f00faa2ee205cc3f79de99392b2ee1a9cd04ede3693fbda33ecb23d804afc5cf"
+    },
+    {
+      "path": "schemas/topic-pack.schema.json",
+      "bytes": 8843,
+      "sha256": "fd682c821762b14abaf5d2fe8ee7aff61bac3ab62a3a1363ca7b8edfe5e7f7ff"
+    }
+  ]
+}

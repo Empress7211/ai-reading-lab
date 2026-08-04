@@ -1,0 +1,41 @@
+flowchart TD
+    A[Open Discover] --> B{Choose input}
+    B -->|Suggested topic| C[Review topic assumptions]
+    B -->|Keywords / question| C
+    B -->|Seed paper / Zotero collection| C
+
+    C --> D[Generate candidate pool]
+    D --> E[Resolve IDs and versions]
+    E --> F[Classify roles and optimize diversity]
+    F --> G[Balanced Reading Pack]
+
+    G --> H{User edits pack?}
+    H -->|Replace / pin / correct role| F
+    H -->|Start reading| I{PDF available?}
+
+    I -->|Zotero or local| J[Open Reader]
+    I -->|Legal OA source| K[Download and verify]
+    I -->|No legal PDF| L[Open source page / manual import]
+    K --> M[Attach or link in Zotero]
+    L --> M
+    M --> J
+
+    J --> N[Pre-read guide]
+    N --> O[Read / highlight / ask]
+    O --> P[Create Evidence Anchor]
+    P --> Q[AI produces structured Draft]
+    Q --> R{Human review}
+    R -->|Accept| S[Verified knowledge]
+    R -->|Edit| S
+    R -->|Reject| O
+
+    S --> T{Finish paper?}
+    T -->|No| O
+    T -->|Yes| U[Post-read cognitive delta]
+    U --> V[Preview Zotero and Git writes]
+    V --> W[Sync / commit]
+    W --> X{At least two verified papers?}
+    X -->|No| G
+    X -->|Yes| Y[Proposition Matrix and synthesis]
+    Y --> Z[Next paper / research question / experiment task]
+    Z --> G

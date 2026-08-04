@@ -1,0 +1,92 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://paperweave.local/schemas/model-profile.schema.json",
+  "title": "PaperWeave Model Profile",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "id", "name", "provider_type", "base_url", "credential_ref", "models", "routing", "privacy", "limits"],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "id": { "type": "string", "format": "uuid" },
+    "name": { "type": "string", "minLength": 1, "maxLength": 100 },
+    "provider_type": {
+      "type": "string",
+      "enum": ["openai_compatible", "native_provider", "local_openai_compatible", "disabled"]
+    },
+    "base_url": { "type": ["string", "null"], "format": "uri" },
+    "credential_ref": { "type": ["string", "null"], "maxLength": 300 },
+    "models": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "display_name", "capabilities", "context_window", "enabled"],
+        "properties": {
+          "id": { "type": "string", "minLength": 1, "maxLength": 200 },
+          "display_name": { "type": "string", "minLength": 1, "maxLength": 200 },
+          "capabilities": {
+            "type": "array",
+            "items": { "type": "string", "enum": ["text", "reasoning", "vision", "embedding", "json_schema", "tool_calling", "streaming"] },
+            "uniqueItems": true
+          },
+          "context_window": { "type": ["integer", "null"], "minimum": 1 },
+          "max_output_tokens": { "type": ["integer", "null"], "minimum": 1 },
+          "input_cost_per_million": { "type": ["number", "null"], "minimum": 0 },
+          "output_cost_per_million": { "type": ["number", "null"], "minimum": 0 },
+          "currency": { "type": "string", "enum": ["USD", "CNY", "EUR", "SGD", "custom"] },
+          "enabled": { "type": "boolean" }
+        }
+      }
+    },
+    "routing": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["topic_classification", "claim_extraction", "deep_synthesis", "vision", "embedding", "translation"],
+      "properties": {
+        "topic_classification": { "$ref": "#/$defs/modelRoute" },
+        "claim_extraction": { "$ref": "#/$defs/modelRoute" },
+        "deep_synthesis": { "$ref": "#/$defs/modelRoute" },
+        "vision": { "$ref": "#/$defs/modelRoute" },
+        "embedding": { "$ref": "#/$defs/modelRoute" },
+        "translation": { "$ref": "#/$defs/modelRoute" }
+      }
+    },
+    "privacy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["local_only", "allow_full_text", "allow_images", "retain_raw_responses_days"],
+      "properties": {
+        "local_only": { "type": "boolean" },
+        "allow_full_text": { "type": "boolean" },
+        "allow_images": { "type": "boolean" },
+        "retain_raw_responses_days": { "type": "integer", "minimum": 0, "maximum": 3650 },
+        "user_provider_policy_note": { "type": ["string", "null"], "maxLength": 1000 }
+      }
+    },
+    "limits": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["max_concurrency", "request_timeout_seconds", "daily_budget", "per_task_budget"],
+      "properties": {
+        "max_concurrency": { "type": "integer", "minimum": 1, "maximum": 128 },
+        "request_timeout_seconds": { "type": "integer", "minimum": 1, "maximum": 3600 },
+        "daily_budget": { "type": ["number", "null"], "minimum": 0 },
+        "per_task_budget": { "type": ["number", "null"], "minimum": 0 },
+        "currency": { "type": "string", "enum": ["USD", "CNY", "EUR", "SGD", "custom"] }
+      }
+    }
+  },
+  "$defs": {
+    "modelRoute": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["primary_model_id", "fallback_model_ids"],
+      "properties": {
+        "primary_model_id": { "type": ["string", "null"], "maxLength": 200 },
+        "fallback_model_ids": { "type": "array", "items": { "type": "string", "maxLength": 200 }, "uniqueItems": true },
+        "max_input_tokens": { "type": ["integer", "null"], "minimum": 1 },
+        "temperature": { "type": ["number", "null"], "minimum": 0, "maximum": 2 }
+      }
+    }
+  }
+}

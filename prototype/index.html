@@ -1,16 +1,1315 @@
 <!doctype html>
 <html lang="zh-CN">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta
-      name="description"
-      content="AI Reading Lab — evidence-grounded paper reading workspace prototype"
-    />
-    <title>AI Reading Lab · 产品原型</title>
-  </head>
-  <body>
-    <div id="root"></div>
-    <script type="module" src="/src/main.jsx"></script>
-  </body>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="color-scheme" content="light" />
+  <title>PaperWeave / 论织 — 交互原型</title>
+  <style>
+    :root {
+      --bg: #f3f5f2;
+      --surface: #ffffff;
+      --surface-2: #f8f9f7;
+      --surface-3: #eef1ed;
+      --ink: #18201d;
+      --muted: #68726d;
+      --muted-2: #8b948f;
+      --line: #dde2de;
+      --line-strong: #cbd2cd;
+      --accent: #2d5d73;
+      --accent-soft: #e8f1f4;
+      --accent-strong: #18475f;
+      --foundation: #9a6a18;
+      --foundation-soft: #f7efd9;
+      --frontier: #315e93;
+      --frontier-soft: #e7eef7;
+      --counter: #9a493f;
+      --counter-soft: #f7e8e5;
+      --bridge: #6d5b8e;
+      --bridge-soft: #eee9f5;
+      --resource: #4d7462;
+      --resource-soft: #e7f0eb;
+      --success: #2c6b4f;
+      --success-soft: #e5f1eb;
+      --warning: #9a6a18;
+      --danger: #a23f3f;
+      --shadow-sm: 0 1px 2px rgba(24, 32, 29, .05), 0 8px 24px rgba(24, 32, 29, .04);
+      --shadow-md: 0 16px 50px rgba(24, 32, 29, .12);
+      --radius-sm: 8px;
+      --radius: 12px;
+      --radius-lg: 18px;
+      --sidebar: 232px;
+      --topbar: 62px;
+      font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+    html, body { height: 100%; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      overflow: hidden;
+      -webkit-font-smoothing: antialiased;
+    }
+    button, input, select, textarea { font: inherit; }
+    button { color: inherit; }
+    a { color: inherit; }
+    :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+    .app-shell {
+      display: grid;
+      grid-template-columns: var(--sidebar) minmax(0, 1fr);
+      height: 100vh;
+    }
+
+    .sidebar {
+      background: #fbfcfa;
+      border-right: 1px solid var(--line);
+      padding: 18px 14px 14px;
+      display: flex;
+      flex-direction: column;
+      min-width: 0;
+      z-index: 4;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 3px 8px 19px;
+    }
+    .brand-mark {
+      width: 30px;
+      height: 30px;
+      border-radius: 9px;
+      display: grid;
+      place-items: center;
+      color: white;
+      background: var(--ink);
+      box-shadow: inset 0 0 0 1px rgba(255,255,255,.12);
+    }
+    .brand-mark svg { width: 18px; height: 18px; }
+    .brand-name { font-size: 15px; font-weight: 740; letter-spacing: -.01em; }
+    .brand-cn { font-size: 11px; color: var(--muted); margin-top: 1px; }
+
+    .nav-label {
+      font-size: 10px;
+      color: var(--muted-2);
+      text-transform: uppercase;
+      letter-spacing: .12em;
+      padding: 11px 10px 7px;
+      font-weight: 700;
+    }
+    .nav-list { display: grid; gap: 3px; }
+    .nav-button {
+      width: 100%;
+      min-height: 39px;
+      border: 0;
+      border-radius: 9px;
+      background: transparent;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 0 10px;
+      color: #59635e;
+      cursor: pointer;
+      font-size: 13px;
+      text-align: left;
+    }
+    .nav-button:hover { background: var(--surface-3); color: var(--ink); }
+    .nav-button.active { background: #e9ece8; color: var(--ink); font-weight: 670; }
+    .nav-button svg { width: 17px; height: 17px; flex: 0 0 auto; }
+    .nav-count {
+      margin-left: auto;
+      min-width: 20px;
+      height: 20px;
+      padding: 0 6px;
+      border-radius: 999px;
+      background: var(--surface-3);
+      display: grid;
+      place-items: center;
+      font-size: 10px;
+      color: var(--muted);
+    }
+    .nav-button.active .nav-count { background: white; color: var(--ink); }
+
+    .sidebar-spacer { flex: 1; min-height: 18px; }
+    .connection-card {
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: var(--surface);
+      padding: 11px;
+      box-shadow: var(--shadow-sm);
+    }
+    .connection-title { font-size: 11px; color: var(--muted); margin-bottom: 8px; }
+    .connection-row { display: flex; align-items: center; gap: 7px; font-size: 11px; margin-top: 6px; }
+    .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--success); box-shadow: 0 0 0 3px var(--success-soft); }
+    .dot.warning { background: var(--warning); box-shadow: 0 0 0 3px var(--foundation-soft); }
+    .connection-row span:last-child { margin-left: auto; color: var(--muted-2); }
+    .profile-row {
+      display: flex;
+      gap: 9px;
+      align-items: center;
+      padding: 13px 7px 2px;
+      color: var(--muted);
+      font-size: 11px;
+    }
+    .avatar { width: 28px; height: 28px; border-radius: 50%; background: #dfe6e2; display: grid; place-items: center; font-weight: 700; color: #43504a; }
+    .profile-row strong { display: block; color: var(--ink); font-size: 12px; }
+
+    .workspace { min-width: 0; display: grid; grid-template-rows: var(--topbar) minmax(0, 1fr); }
+    .topbar {
+      background: rgba(251,252,250,.94);
+      backdrop-filter: blur(14px);
+      border-bottom: 1px solid var(--line);
+      display: flex;
+      align-items: center;
+      padding: 0 22px;
+      gap: 16px;
+      z-index: 3;
+      min-width: 0;
+    }
+    .crumb { min-width: 160px; }
+    .crumb-title { font-weight: 690; font-size: 13px; }
+    .crumb-sub { font-size: 10px; color: var(--muted); margin-top: 2px; }
+    .global-search {
+      width: min(520px, 48vw);
+      margin-left: auto;
+      position: relative;
+    }
+    .global-search svg { position: absolute; left: 11px; top: 50%; width: 15px; height: 15px; transform: translateY(-50%); color: var(--muted-2); }
+    .global-search input {
+      width: 100%; height: 36px; border: 1px solid var(--line); background: var(--surface);
+      border-radius: 9px; padding: 0 84px 0 34px; color: var(--ink); font-size: 12px;
+    }
+    .search-key { position: absolute; right: 8px; top: 50%; transform: translateY(-50%); border: 1px solid var(--line); background: var(--surface-2); border-radius: 5px; padding: 2px 6px; font-size: 9px; color: var(--muted); }
+    .top-actions { display: flex; align-items: center; gap: 7px; }
+    .icon-button {
+      height: 34px; min-width: 34px; border: 1px solid var(--line); background: var(--surface); border-radius: 8px;
+      display: grid; place-items: center; cursor: pointer; color: var(--muted);
+    }
+    .icon-button:hover { color: var(--ink); border-color: var(--line-strong); }
+    .icon-button svg { width: 16px; height: 16px; }
+
+    #viewHost { min-width: 0; min-height: 0; overflow: auto; }
+    .page { width: min(1390px, 100%); margin: 0 auto; padding: 32px 34px 56px; }
+
+    .demo-banner {
+      display: flex; align-items: center; gap: 9px; padding: 9px 12px; border: 1px solid #d7dfda;
+      background: #f8faf7; color: #59635e; border-radius: 9px; font-size: 11px; margin-bottom: 24px;
+    }
+    .demo-banner svg { width: 15px; height: 15px; flex: none; }
+    .demo-banner strong { color: var(--ink); }
+
+    .discover-hero {
+      display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(290px, .7fr); gap: 28px; align-items: end;
+      margin-bottom: 25px;
+    }
+    .hero-copy h1 { margin: 0; font-size: clamp(27px, 3vw, 43px); line-height: 1.12; letter-spacing: -.04em; max-width: 760px; font-weight: 760; }
+    .hero-copy p { margin: 12px 0 0; max-width: 690px; color: var(--muted); font-size: 13px; line-height: 1.75; }
+    .hero-side { display: grid; gap: 7px; align-self: stretch; justify-content: end; align-content: end; }
+    .micro-stat { display: flex; align-items: baseline; gap: 8px; justify-content: flex-end; }
+    .micro-stat strong { font-size: 22px; letter-spacing: -.03em; }
+    .micro-stat span { color: var(--muted); font-size: 11px; }
+
+    .topic-composer {
+      border: 1px solid var(--line); background: var(--surface); box-shadow: var(--shadow-sm); border-radius: var(--radius-lg);
+      padding: 14px; margin-bottom: 17px;
+    }
+    .composer-main { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; }
+    .topic-input-wrap { position: relative; }
+    .topic-input-wrap svg { position: absolute; width: 19px; height: 19px; left: 14px; top: 15px; color: var(--muted); }
+    .topic-input {
+      width: 100%; min-height: 50px; border: 0; background: var(--surface-2); border-radius: 12px;
+      padding: 0 15px 0 44px; font-size: 14px; color: var(--ink);
+    }
+    .primary-button, .secondary-button, .ghost-button, .danger-button {
+      border-radius: 9px; min-height: 36px; padding: 0 14px; border: 1px solid transparent; cursor: pointer; font-size: 12px; font-weight: 650;
+      display: inline-flex; align-items: center; justify-content: center; gap: 7px; white-space: nowrap;
+    }
+    .primary-button { background: var(--ink); color: white; }
+    .primary-button:hover { background: #2b3631; }
+    .primary-button svg, .secondary-button svg, .ghost-button svg { width: 15px; height: 15px; }
+    .secondary-button { background: var(--surface); border-color: var(--line); color: var(--ink); }
+    .secondary-button:hover { border-color: var(--line-strong); background: var(--surface-2); }
+    .ghost-button { background: transparent; color: var(--muted); border-color: transparent; padding: 0 8px; }
+    .ghost-button:hover { background: var(--surface-3); color: var(--ink); }
+    .danger-button { background: var(--counter-soft); color: var(--danger); }
+    .small-button { min-height: 28px; padding: 0 9px; font-size: 10px; border-radius: 7px; }
+
+    .composer-controls {
+      display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 12px 4px 1px;
+    }
+    .control-pill {
+      border: 1px solid var(--line); border-radius: 999px; background: white; padding: 7px 10px; display: flex; align-items: center; gap: 7px; font-size: 10px; color: var(--muted); cursor: pointer;
+    }
+    .control-pill select { border: 0; background: transparent; color: var(--ink); outline: none; font-size: 10px; }
+    .toggle { width: 25px; height: 14px; background: #cbd2ce; border-radius: 999px; padding: 2px; transition: .18s ease; }
+    .toggle::after { content: ""; display: block; width: 10px; height: 10px; border-radius: 50%; background: white; box-shadow: 0 1px 2px rgba(0,0,0,.2); transition: .18s ease; }
+    .control-pill.on .toggle { background: var(--accent); }
+    .control-pill.on .toggle::after { transform: translateX(11px); }
+    .composer-spacer { flex: 1; }
+
+    .suggestions { display: flex; gap: 7px; flex-wrap: wrap; margin: 0 0 26px; align-items: center; }
+    .suggestions > span { font-size: 10px; color: var(--muted); margin-right: 2px; }
+    .topic-chip {
+      border: 1px solid var(--line); background: rgba(255,255,255,.7); color: #4d5853; border-radius: 999px;
+      padding: 6px 10px; font-size: 10px; cursor: pointer;
+    }
+    .topic-chip:hover, .topic-chip.active { border-color: #aeb9b3; background: white; color: var(--ink); }
+
+    .pack-header { display: flex; align-items: flex-start; gap: 18px; margin: 5px 0 16px; }
+    .pack-header h2 { margin: 0; font-size: 19px; letter-spacing: -.02em; }
+    .pack-header p { margin: 6px 0 0; color: var(--muted); font-size: 11px; line-height: 1.6; max-width: 810px; }
+    .pack-actions { margin-left: auto; display: flex; gap: 7px; }
+    .scope-line { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 11px; }
+    .scope-tag { border-radius: 6px; background: var(--surface-3); color: #59635e; padding: 4px 7px; font-size: 9px; }
+
+    .role-legend { display: flex; align-items: center; gap: 14px; padding: 10px 0 15px; border-top: 1px solid var(--line); }
+    .legend-item { display: flex; align-items: center; gap: 6px; font-size: 10px; color: var(--muted); }
+    .legend-swatch { width: 8px; height: 8px; border-radius: 2px; }
+    .legend-swatch.foundation { background: var(--foundation); }
+    .legend-swatch.frontier { background: var(--frontier); }
+    .legend-swatch.counterpoint { background: var(--counter); }
+    .legend-note { margin-left: auto; font-size: 10px; color: var(--muted-2); }
+
+    .paper-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; align-items: start; }
+    .role-column { min-width: 0; }
+    .role-column-head { display: flex; align-items: center; gap: 8px; margin: 0 2px 9px; }
+    .role-column-head h3 { margin: 0; font-size: 12px; }
+    .role-column-head span { color: var(--muted); font-size: 9px; }
+    .role-column-head .count { margin-left: auto; border-radius: 99px; padding: 3px 6px; background: var(--surface-3); color: var(--muted); }
+    .paper-stack { display: grid; gap: 10px; }
+
+    .paper-card {
+      position: relative; border: 1px solid var(--line); background: var(--surface); border-radius: 13px; padding: 13px;
+      cursor: pointer; transition: transform .15s ease, border-color .15s ease, box-shadow .15s ease; overflow: hidden;
+    }
+    .paper-card::before { content: ""; position: absolute; inset: 0 auto 0 0; width: 3px; background: var(--role-color); opacity: .86; }
+    .paper-card:hover { transform: translateY(-1px); border-color: var(--line-strong); box-shadow: var(--shadow-sm); }
+    .paper-card.foundation { --role-color: var(--foundation); }
+    .paper-card.frontier { --role-color: var(--frontier); }
+    .paper-card.counterpoint { --role-color: var(--counter); }
+    .paper-card.bridge { --role-color: var(--bridge); }
+    .paper-card.resource { --role-color: var(--resource); }
+    .paper-topline { display: flex; align-items: center; gap: 7px; margin-bottom: 9px; }
+    .role-badge { border-radius: 5px; padding: 4px 6px; font-size: 8px; font-weight: 760; text-transform: uppercase; letter-spacing: .05em; }
+    .foundation .role-badge { background: var(--foundation-soft); color: var(--foundation); }
+    .frontier .role-badge { background: var(--frontier-soft); color: var(--frontier); }
+    .counterpoint .role-badge { background: var(--counter-soft); color: var(--counter); }
+    .bridge .role-badge { background: var(--bridge-soft); color: var(--bridge); }
+    .resource .role-badge { background: var(--resource-soft); color: var(--resource); }
+    .confidence { font-size: 8px; color: var(--muted-2); }
+    .pin { margin-left: auto; width: 24px; height: 24px; border: 0; background: transparent; border-radius: 6px; color: var(--muted-2); display: grid; place-items: center; cursor: pointer; }
+    .pin:hover, .pin.pinned { color: var(--accent); background: var(--accent-soft); }
+    .pin svg { width: 13px; height: 13px; }
+    .paper-title { font-family: Georgia, "Times New Roman", serif; font-weight: 700; font-size: 14px; line-height: 1.35; margin: 0 0 6px; }
+    .paper-meta { color: var(--muted); font-size: 9px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .reason { margin: 10px 0; padding: 8px 9px; border-radius: 8px; background: var(--surface-2); color: #4d5853; font-size: 10px; line-height: 1.55; }
+    .reason strong { color: var(--ink); }
+    .paper-status { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+    .status-mini { display: inline-flex; align-items: center; gap: 4px; font-size: 8px; color: var(--muted); }
+    .status-mini svg { width: 11px; height: 11px; }
+    .paper-card-actions { display: flex; gap: 4px; margin-left: auto; }
+    .text-action { border: 0; background: transparent; color: var(--muted); font-size: 9px; cursor: pointer; padding: 4px 5px; border-radius: 5px; }
+    .text-action:hover { background: var(--surface-3); color: var(--ink); }
+
+    .supplement-rail { margin-top: 14px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+    .supplement-card {
+      border: 1px dashed var(--line-strong); border-radius: 12px; background: rgba(255,255,255,.48); padding: 11px 12px; display: flex; align-items: center; gap: 11px; cursor: pointer;
+    }
+    .supplement-card:hover { background: white; }
+    .supplement-icon { width: 34px; height: 34px; border-radius: 9px; display: grid; place-items: center; flex: none; }
+    .supplement-icon.bridge { background: var(--bridge-soft); color: var(--bridge); }
+    .supplement-icon.resource { background: var(--resource-soft); color: var(--resource); }
+    .supplement-icon svg { width: 16px; height: 16px; }
+    .supplement-card strong { font-family: Georgia, serif; font-size: 12px; display: block; }
+    .supplement-card span { font-size: 9px; color: var(--muted); display: block; margin-top: 3px; }
+    .supplement-card .arrow { margin-left: auto; color: var(--muted); }
+
+    .section-heading { display: flex; align-items: end; gap: 14px; margin-bottom: 18px; }
+    .section-heading h1 { margin: 0; font-size: 25px; letter-spacing: -.03em; }
+    .section-heading p { margin: 5px 0 0; font-size: 11px; color: var(--muted); }
+    .section-heading .actions { margin-left: auto; display: flex; gap: 7px; }
+
+    .metric-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 11px; margin-bottom: 20px; }
+    .metric-card { border: 1px solid var(--line); background: var(--surface); border-radius: 12px; padding: 13px; }
+    .metric-card span { font-size: 9px; color: var(--muted); }
+    .metric-card strong { display: block; margin-top: 7px; font-size: 21px; letter-spacing: -.03em; }
+    .metric-card small { display: block; margin-top: 5px; font-size: 9px; color: var(--muted-2); }
+
+    .table-shell { border: 1px solid var(--line); border-radius: 13px; background: var(--surface); overflow: hidden; }
+    .table-toolbar { min-height: 48px; padding: 8px 12px; display: flex; align-items: center; gap: 8px; border-bottom: 1px solid var(--line); }
+    .filter-button { border: 1px solid var(--line); background: var(--surface); border-radius: 7px; height: 29px; padding: 0 9px; font-size: 9px; color: var(--muted); cursor: pointer; }
+    .filter-button.active { background: var(--surface-3); color: var(--ink); }
+    .table-search { margin-left: auto; width: 230px; height: 29px; border: 1px solid var(--line); border-radius: 7px; padding: 0 9px; font-size: 9px; }
+    table { width: 100%; border-collapse: collapse; }
+    th { height: 36px; text-align: left; color: var(--muted); font-size: 8px; text-transform: uppercase; letter-spacing: .07em; background: var(--surface-2); border-bottom: 1px solid var(--line); padding: 0 12px; }
+    td { border-bottom: 1px solid var(--line); padding: 11px 12px; font-size: 10px; vertical-align: middle; }
+    tr:last-child td { border-bottom: 0; }
+    tbody tr { cursor: pointer; }
+    tbody tr:hover { background: #fafbf9; }
+    .title-cell strong { display: block; font-family: Georgia, serif; font-size: 12px; max-width: 490px; }
+    .title-cell span { color: var(--muted); font-size: 9px; display: block; margin-top: 3px; }
+    .state-badge { padding: 4px 6px; border-radius: 5px; font-size: 8px; background: var(--surface-3); color: var(--muted); }
+    .state-badge.verified { background: var(--success-soft); color: var(--success); }
+    .state-badge.reading { background: var(--accent-soft); color: var(--accent); }
+    .state-badge.queued { background: var(--foundation-soft); color: var(--foundation); }
+
+    .knowledge-layout { display: grid; grid-template-columns: minmax(0, 1.45fr) minmax(270px, .55fr); gap: 15px; }
+    .panel { border: 1px solid var(--line); background: var(--surface); border-radius: 13px; overflow: hidden; }
+    .panel-head { padding: 13px 14px; border-bottom: 1px solid var(--line); display: flex; align-items: center; gap: 8px; }
+    .panel-head strong { font-size: 12px; }
+    .panel-head span { font-size: 9px; color: var(--muted); }
+    .panel-head .right { margin-left: auto; }
+    .matrix-wrap { overflow: auto; }
+    .matrix-table th:first-child, .matrix-table td:first-child { position: sticky; left: 0; background: white; z-index: 1; min-width: 280px; }
+    .matrix-table th { min-width: 110px; }
+    .stance { display: inline-flex; align-items: center; gap: 5px; font-size: 8px; font-weight: 690; }
+    .stance::before { content: ""; width: 7px; height: 7px; border-radius: 2px; }
+    .stance.support { color: var(--success); }
+    .stance.support::before { background: var(--success); }
+    .stance.counter { color: var(--counter); }
+    .stance.counter::before { background: var(--counter); }
+    .stance.qualify { color: var(--warning); }
+    .stance.qualify::before { background: var(--warning); }
+    .stance.incomparable { color: var(--muted); }
+    .stance.incomparable::before { border: 1px solid var(--muted); background: transparent; }
+    .insight-list { padding: 4px 14px 14px; }
+    .insight-item { padding: 12px 0; border-bottom: 1px solid var(--line); }
+    .insight-item:last-child { border-bottom: 0; }
+    .insight-item small { color: var(--muted-2); font-size: 8px; text-transform: uppercase; letter-spacing: .06em; }
+    .insight-item strong { display: block; font-size: 11px; margin-top: 5px; line-height: 1.45; }
+    .insight-item p { margin: 5px 0 0; font-size: 9px; color: var(--muted); line-height: 1.55; }
+
+    .sync-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-bottom: 17px; }
+    .sync-card { border: 1px solid var(--line); background: var(--surface); border-radius: 13px; padding: 14px; }
+    .sync-card-head { display: flex; align-items: center; gap: 9px; }
+    .service-mark { width: 34px; height: 34px; border-radius: 9px; background: var(--surface-3); display: grid; place-items: center; }
+    .service-mark svg { width: 17px; height: 17px; }
+    .sync-card-head strong { display: block; font-size: 12px; }
+    .sync-card-head span { display: block; font-size: 9px; color: var(--muted); margin-top: 2px; }
+    .sync-state { margin-left: auto; font-size: 8px; color: var(--success); background: var(--success-soft); padding: 4px 6px; border-radius: 5px; }
+    .sync-card-body { margin: 13px 0; display: grid; gap: 7px; }
+    .sync-detail { display: flex; font-size: 9px; color: var(--muted); }
+    .sync-detail span:last-child { margin-left: auto; color: var(--ink); }
+    .sync-card-actions { display: flex; gap: 7px; }
+    .activity-list { padding: 0 14px; }
+    .activity-row { display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; gap: 9px; align-items: start; padding: 12px 0; border-bottom: 1px solid var(--line); }
+    .activity-row:last-child { border-bottom: 0; }
+    .activity-icon { width: 22px; height: 22px; border-radius: 6px; display: grid; place-items: center; background: var(--success-soft); color: var(--success); }
+    .activity-icon svg { width: 12px; height: 12px; }
+    .activity-row strong { font-size: 10px; display: block; }
+    .activity-row p { margin: 3px 0 0; font-size: 9px; color: var(--muted); }
+    .activity-row time { font-size: 8px; color: var(--muted-2); }
+
+    .settings-layout { display: grid; grid-template-columns: 190px minmax(0, 760px); gap: 24px; }
+    .settings-nav { display: grid; gap: 4px; align-content: start; }
+    .settings-nav button { border: 0; background: transparent; text-align: left; border-radius: 7px; height: 34px; padding: 0 9px; color: var(--muted); font-size: 10px; cursor: pointer; }
+    .settings-nav button.active { background: var(--surface-3); color: var(--ink); font-weight: 650; }
+    .settings-section { border: 1px solid var(--line); background: var(--surface); border-radius: 13px; overflow: hidden; }
+    .settings-section-head { padding: 15px 16px; border-bottom: 1px solid var(--line); }
+    .settings-section-head h2 { margin: 0; font-size: 15px; }
+    .settings-section-head p { margin: 5px 0 0; color: var(--muted); font-size: 9px; }
+    .settings-body { padding: 15px 16px; display: grid; gap: 14px; }
+    .field-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+    .field { display: grid; gap: 6px; }
+    .field.full { grid-column: 1 / -1; }
+    .field label { font-size: 9px; color: var(--muted); }
+    .field input, .field select, .field textarea {
+      width: 100%; border: 1px solid var(--line); background: var(--surface); border-radius: 8px; min-height: 36px; padding: 8px 10px; color: var(--ink); font-size: 10px;
+    }
+    .field textarea { min-height: 78px; resize: vertical; }
+    .field-note { font-size: 8px; color: var(--muted-2); line-height: 1.5; }
+    .setting-row { display: flex; align-items: center; gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--line); }
+    .setting-row:last-child { border-bottom: 0; }
+    .setting-row strong { font-size: 10px; display: block; }
+    .setting-row span { font-size: 8px; color: var(--muted); display: block; margin-top: 3px; }
+    .switch { margin-left: auto; width: 34px; height: 19px; border: 0; border-radius: 99px; padding: 3px; background: #c7cfca; cursor: pointer; }
+    .switch::after { content: ""; width: 13px; height: 13px; border-radius: 50%; background: white; display: block; transition: .16s ease; }
+    .switch.on { background: var(--accent); }
+    .switch.on::after { transform: translateX(15px); }
+
+    /* Reader */
+    .reader-shell { height: 100%; min-height: 0; display: grid; grid-template-rows: 50px minmax(0, 1fr); background: #e9ece9; overflow: hidden; }
+    .reader-toolbar { background: var(--surface); border-bottom: 1px solid var(--line); display: flex; align-items: center; gap: 8px; padding: 0 12px; min-width: 0; }
+    .reader-title { min-width: 0; margin-right: auto; }
+    .reader-title strong { display: block; font-family: Georgia, serif; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 510px; }
+    .reader-title span { display: block; color: var(--muted); font-size: 8px; margin-top: 2px; }
+    .tool-divider { width: 1px; height: 20px; background: var(--line); margin: 0 2px; }
+    .toolbar-state { height: 28px; border: 1px solid var(--line); border-radius: 7px; display: flex; align-items: center; gap: 6px; padding: 0 8px; font-size: 8px; color: var(--muted); background: var(--surface-2); }
+    .toolbar-state .dot { width: 6px; height: 6px; box-shadow: none; }
+    .reader-grid { display: grid; grid-template-columns: 210px minmax(430px, 1fr) 376px; min-height: 0; }
+    .reader-left, .research-panel { background: var(--surface); min-height: 0; overflow: hidden; }
+    .reader-left { border-right: 1px solid var(--line); display: grid; grid-template-rows: auto minmax(0, 1fr); }
+    .left-tabs { display: flex; border-bottom: 1px solid var(--line); padding: 0 8px; }
+    .left-tabs button { flex: 1; height: 38px; border: 0; background: transparent; font-size: 8px; color: var(--muted); cursor: pointer; border-bottom: 2px solid transparent; }
+    .left-tabs button.active { color: var(--ink); border-bottom-color: var(--ink); font-weight: 650; }
+    .outline { overflow: auto; padding: 10px 8px 20px; }
+    .outline-item { width: 100%; border: 0; background: transparent; border-radius: 7px; text-align: left; padding: 8px 8px; font-size: 9px; color: var(--muted); cursor: pointer; display: flex; gap: 7px; align-items: baseline; }
+    .outline-item:hover, .outline-item.active { background: var(--surface-3); color: var(--ink); }
+    .outline-item .page-num { margin-left: auto; font-size: 8px; color: var(--muted-2); }
+    .outline-item.level-2 { padding-left: 19px; }
+    .topic-context { margin: 10px 8px; padding: 10px; border: 1px solid var(--line); background: var(--surface-2); border-radius: 9px; }
+    .topic-context small { font-size: 7px; text-transform: uppercase; letter-spacing: .07em; color: var(--muted-2); }
+    .topic-context strong { display: block; font-size: 9px; margin-top: 5px; line-height: 1.4; }
+    .topic-context p { margin: 5px 0 0; color: var(--muted); font-size: 8px; line-height: 1.45; }
+
+    .pdf-stage { min-width: 0; min-height: 0; overflow: auto; padding: 26px 32px 60px; scroll-behavior: smooth; background: #e5e8e5; }
+    .pdf-page {
+      width: min(760px, 100%); min-height: 980px; margin: 0 auto 22px; background: white; box-shadow: 0 3px 13px rgba(26,32,29,.13);
+      padding: 58px 64px 64px; font-family: Georgia, "Times New Roman", serif; color: #202522; position: relative;
+    }
+    .pdf-page-number { position: absolute; bottom: 24px; left: 0; right: 0; text-align: center; font-size: 9px; color: #777; }
+    .paper-headline { text-align: center; margin: 10px auto 20px; font-size: 25px; line-height: 1.2; letter-spacing: -.02em; max-width: 620px; }
+    .paper-authors { text-align: center; font-size: 10px; color: #4c534f; line-height: 1.5; }
+    .paper-affiliation { text-align: center; font-size: 8px; color: #777; margin-top: 5px; }
+    .abstract-box { margin: 30px auto 24px; max-width: 585px; }
+    .abstract-box h4 { text-align: center; font-size: 11px; margin: 0 0 8px; }
+    .abstract-box p, .pdf-copy p { font-size: 10.5px; line-height: 1.62; text-align: justify; margin: 0 0 11px; }
+    .pdf-columns { columns: 2; column-gap: 31px; column-rule: 1px solid #efefef; }
+    .pdf-copy h2 { column-span: none; font-size: 13px; margin: 15px 0 7px; }
+    .pdf-copy h3 { font-size: 11px; margin: 13px 0 6px; }
+    .evidence-source { background: linear-gradient(transparent 15%, #fff2b8 15%, #fff2b8 89%, transparent 89%); cursor: pointer; border-radius: 2px; }
+    .evidence-source.flash { animation: anchorFlash 1.35s ease; }
+    @keyframes anchorFlash { 0%,100% { background-color: transparent; } 35% { background-color: #f7d965; } }
+    .paper-figure { break-inside: avoid; margin: 14px 0; border: 1px solid #aaa; padding: 8px; }
+    .figure-diagram { height: 120px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; align-items: center; }
+    .figure-node { border: 1px solid #777; border-radius: 3px; padding: 10px 5px; text-align: center; font-family: ui-sans-serif, sans-serif; font-size: 8px; position: relative; }
+    .figure-node:not(:last-child)::after { content: "→"; position: absolute; right: -14px; top: 50%; transform: translateY(-50%); }
+    .figure-caption { font-size: 8px; line-height: 1.45; margin-top: 6px; }
+    .paper-table { width: 100%; margin: 12px 0 5px; border-collapse: collapse; font-size: 8px; break-inside: avoid; }
+    .paper-table th, .paper-table td { border: 1px solid #8c8c8c; height: auto; padding: 4px; background: white; color: #222; font-size: 8px; }
+    .paper-table caption { caption-side: bottom; text-align: left; padding-top: 5px; line-height: 1.4; }
+    .formula { text-align: center; font-family: "Times New Roman", serif; font-style: italic; margin: 13px 0; font-size: 12px; }
+
+    .research-panel { border-left: 1px solid var(--line); display: grid; grid-template-rows: auto minmax(0, 1fr); }
+    .research-tabs { display: flex; padding: 0 8px; border-bottom: 1px solid var(--line); min-width: 0; }
+    .research-tabs button { height: 41px; padding: 0 9px; border: 0; border-bottom: 2px solid transparent; background: transparent; font-size: 8px; color: var(--muted); cursor: pointer; white-space: nowrap; }
+    .research-tabs button.active { color: var(--ink); border-bottom-color: var(--ink); font-weight: 680; }
+    .tab-count { display: inline-grid; place-items: center; min-width: 16px; height: 16px; margin-left: 3px; padding: 0 4px; border-radius: 99px; background: var(--counter-soft); color: var(--counter); font-size: 7px; }
+    .research-content { overflow: auto; padding: 13px 13px 24px; }
+    .panel-intro { margin-bottom: 13px; }
+    .panel-intro small { color: var(--muted-2); font-size: 7px; text-transform: uppercase; letter-spacing: .08em; }
+    .panel-intro h3 { margin: 6px 0 4px; font-size: 14px; letter-spacing: -.02em; }
+    .panel-intro p { margin: 0; font-size: 9px; color: var(--muted); line-height: 1.55; }
+    .guide-card { border: 1px solid var(--line); border-radius: 10px; padding: 11px; margin-bottom: 9px; background: var(--surface); }
+    .guide-card-head { display: flex; align-items: center; gap: 7px; margin-bottom: 7px; }
+    .guide-icon { width: 24px; height: 24px; border-radius: 7px; background: var(--accent-soft); color: var(--accent); display: grid; place-items: center; }
+    .guide-icon svg { width: 13px; height: 13px; }
+    .guide-card strong { font-size: 10px; }
+    .guide-card p { font-size: 9px; color: var(--muted); line-height: 1.55; margin: 0; }
+    .guide-list { display: grid; gap: 6px; }
+    .guide-step { border: 0; background: var(--surface-2); border-radius: 7px; padding: 8px; cursor: pointer; text-align: left; display: grid; grid-template-columns: 20px minmax(0, 1fr); gap: 7px; }
+    .guide-step:hover { background: var(--surface-3); }
+    .step-num { width: 20px; height: 20px; border-radius: 6px; background: white; border: 1px solid var(--line); display: grid; place-items: center; font-size: 8px; }
+    .guide-step strong { font-size: 9px; display: block; }
+    .guide-step span { font-size: 8px; color: var(--muted); display: block; margin-top: 2px; line-height: 1.4; }
+    .question-list { display: grid; gap: 6px; }
+    .question-item { display: grid; grid-template-columns: 13px minmax(0,1fr); gap: 6px; font-size: 9px; line-height: 1.5; color: #46504b; }
+    .question-item::before { content: "?"; width: 13px; height: 13px; border-radius: 50%; background: var(--foundation-soft); color: var(--foundation); display: grid; place-items: center; font-size: 7px; font-weight: 800; margin-top: 1px; }
+
+    .review-summary { display: flex; align-items: center; gap: 8px; border: 1px solid var(--line); background: var(--surface-2); padding: 9px; border-radius: 9px; margin-bottom: 10px; }
+    .review-summary strong { font-size: 10px; }
+    .review-summary span { font-size: 8px; color: var(--muted); }
+    .review-progress { margin-left: auto; font-size: 8px; color: var(--success); }
+    .claim-card { border: 1px solid var(--line); border-radius: 10px; background: var(--surface); padding: 10px; margin-bottom: 9px; transition: opacity .15s ease; }
+    .claim-card.rejected { opacity: .55; }
+    .claim-card.accepted { border-color: #bcd3c7; background: #fbfdfc; }
+    .claim-head { display: flex; align-items: center; gap: 6px; margin-bottom: 7px; }
+    .epistemic { font-size: 7px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
+    .draft-badge { padding: 3px 5px; border-radius: 4px; font-size: 7px; margin-left: auto; background: var(--foundation-soft); color: var(--foundation); }
+    .draft-badge.accepted { background: var(--success-soft); color: var(--success); }
+    .draft-badge.rejected { background: var(--counter-soft); color: var(--counter); }
+    .claim-text { font-size: 10px; line-height: 1.55; margin: 0 0 7px; }
+    .claim-editor { width: 100%; min-height: 72px; border: 1px solid var(--line); border-radius: 7px; padding: 8px; font-size: 9px; line-height: 1.5; resize: vertical; }
+    .anchor-row { display: flex; gap: 5px; flex-wrap: wrap; margin-bottom: 7px; }
+    .anchor-chip { border: 1px solid #d4dcd7; background: var(--surface-2); color: var(--accent); border-radius: 5px; padding: 4px 6px; font-size: 7px; cursor: pointer; }
+    .anchor-chip:hover { background: var(--accent-soft); }
+    .scope-note { font-size: 8px; line-height: 1.45; color: var(--muted); padding: 6px 7px; background: var(--surface-2); border-radius: 6px; margin-bottom: 8px; }
+    .claim-actions { display: flex; gap: 5px; }
+    .claim-actions button { border: 1px solid var(--line); background: white; border-radius: 6px; height: 27px; padding: 0 8px; font-size: 8px; cursor: pointer; }
+    .claim-actions button:hover { background: var(--surface-3); }
+    .claim-actions button.accept { color: var(--success); }
+    .claim-actions button.reject { color: var(--counter); }
+    .claim-actions .spacer { flex: 1; }
+
+    .notes-editor { width: 100%; min-height: 330px; border: 0; background: transparent; resize: none; color: var(--ink); font-size: 10px; line-height: 1.65; outline: none; }
+    .editor-toolbar { display: flex; align-items: center; gap: 5px; border: 1px solid var(--line); background: var(--surface-2); border-radius: 8px; padding: 5px; margin-bottom: 8px; }
+    .editor-toolbar button { width: 26px; height: 25px; border: 0; background: transparent; border-radius: 5px; font-size: 9px; cursor: pointer; color: var(--muted); }
+    .editor-toolbar button:hover { background: white; color: var(--ink); }
+    .autosave { font-size: 7px; color: var(--muted-2); margin-left: auto; padding-right: 4px; }
+
+    .chat-history { display: grid; gap: 9px; margin-bottom: 12px; }
+    .chat-message { border-radius: 9px; padding: 9px 10px; font-size: 9px; line-height: 1.55; }
+    .chat-message.user { margin-left: 38px; background: var(--accent-soft); color: #274553; }
+    .chat-message.ai { margin-right: 18px; background: var(--surface-2); border: 1px solid var(--line); }
+    .chat-citations { display: flex; gap: 5px; margin-top: 7px; }
+    .suggested-questions { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 10px; }
+    .suggested-questions button { border: 1px solid var(--line); background: white; color: var(--muted); border-radius: 7px; padding: 6px 7px; font-size: 8px; cursor: pointer; text-align: left; }
+    .suggested-questions button:hover { color: var(--ink); background: var(--surface-2); }
+    .ask-box { border: 1px solid var(--line); border-radius: 10px; padding: 7px; background: white; }
+    .ask-box textarea { width: 100%; border: 0; resize: none; min-height: 58px; outline: none; font-size: 9px; line-height: 1.5; }
+    .ask-actions { display: flex; align-items: center; }
+    .scope-select { border: 0; background: transparent; font-size: 8px; color: var(--muted); }
+    .ask-actions button { margin-left: auto; }
+
+    /* Modal, palette, toast */
+    .modal-backdrop { position: fixed; inset: 0; background: rgba(25,32,29,.38); backdrop-filter: blur(3px); display: grid; place-items: center; z-index: 30; padding: 24px; }
+    .modal { width: min(720px, 100%); max-height: min(780px, calc(100vh - 48px)); overflow: auto; border-radius: 15px; background: white; box-shadow: var(--shadow-md); border: 1px solid rgba(255,255,255,.4); }
+    .modal-head { display: flex; align-items: flex-start; gap: 12px; padding: 17px 18px 14px; border-bottom: 1px solid var(--line); }
+    .modal-head h2 { margin: 0; font-size: 16px; }
+    .modal-head p { margin: 4px 0 0; font-size: 9px; color: var(--muted); }
+    .modal-head button { margin-left: auto; }
+    .modal-body { padding: 16px 18px; }
+    .modal-foot { padding: 12px 18px; border-top: 1px solid var(--line); display: flex; justify-content: flex-end; gap: 7px; }
+    .sync-plan { display: grid; gap: 10px; }
+    .plan-group { border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+    .plan-group-head { display: flex; align-items: center; gap: 8px; padding: 10px 11px; background: var(--surface-2); border-bottom: 1px solid var(--line); }
+    .plan-group-head > svg { width: 15px; height: 15px; flex: 0 0 auto; }
+    .plan-group-head strong { font-size: 10px; }
+    .plan-group-head span { margin-left: auto; font-size: 8px; color: var(--muted); }
+    .plan-row { display: flex; gap: 8px; align-items: flex-start; padding: 9px 11px; border-bottom: 1px solid var(--line); font-size: 9px; }
+    .plan-row:last-child { border-bottom: 0; }
+    .plan-row svg { width: 13px; height: 13px; color: var(--success); flex: none; margin-top: 1px; }
+    .plan-row strong { display: block; }
+    .plan-row span { display: block; color: var(--muted); font-size: 8px; margin-top: 2px; }
+    .diff-box { background: #202722; color: #dfe8e2; border-radius: 8px; padding: 10px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 8px; line-height: 1.55; white-space: pre-wrap; }
+    .diff-add { color: #96d6ad; }
+
+    .command-backdrop { position: fixed; inset: 0; background: rgba(25,32,29,.25); z-index: 40; display: grid; align-items: start; justify-items: center; padding-top: 12vh; }
+    .command-palette { width: min(600px, calc(100vw - 28px)); border: 1px solid var(--line); background: white; border-radius: 13px; box-shadow: var(--shadow-md); overflow: hidden; }
+    .command-input { height: 48px; border: 0; border-bottom: 1px solid var(--line); width: 100%; padding: 0 15px; outline: none; font-size: 12px; }
+    .command-results { padding: 7px; max-height: 360px; overflow: auto; }
+    .command-item { width: 100%; border: 0; background: transparent; display: flex; align-items: center; gap: 9px; border-radius: 8px; min-height: 39px; padding: 0 9px; cursor: pointer; text-align: left; }
+    .command-item:hover, .command-item.active { background: var(--surface-3); }
+    .command-item svg { width: 15px; height: 15px; color: var(--muted); }
+    .command-item strong { font-size: 10px; display: block; }
+    .command-item span { font-size: 8px; color: var(--muted); display: block; margin-top: 2px; }
+    .command-item kbd { margin-left: auto; border: 1px solid var(--line); border-radius: 4px; padding: 2px 5px; font-size: 7px; color: var(--muted); }
+
+    #toastStack { position: fixed; right: 18px; bottom: 18px; z-index: 60; display: grid; gap: 8px; }
+    .toast { min-width: 260px; max-width: 390px; border: 1px solid var(--line); background: white; box-shadow: var(--shadow-md); border-radius: 10px; padding: 10px 11px; display: grid; grid-template-columns: 20px minmax(0,1fr); gap: 8px; animation: toastIn .22s ease; }
+    @keyframes toastIn { from { opacity: 0; transform: translateY(8px); } }
+    .toast-icon { width: 20px; height: 20px; border-radius: 6px; background: var(--success-soft); color: var(--success); display: grid; place-items: center; }
+    .toast-icon svg { width: 12px; height: 12px; }
+    .toast strong { font-size: 10px; display: block; }
+    .toast span { font-size: 8px; color: var(--muted); display: block; margin-top: 3px; line-height: 1.45; }
+
+    .empty-state { text-align: center; padding: 70px 20px; color: var(--muted); }
+    .empty-icon { width: 44px; height: 44px; border-radius: 13px; margin: 0 auto 12px; background: var(--surface-3); display: grid; place-items: center; }
+    .empty-icon svg { width: 20px; height: 20px; }
+    .empty-state h3 { color: var(--ink); margin: 0 0 6px; font-size: 14px; }
+    .empty-state p { margin: 0 auto 14px; font-size: 9px; max-width: 380px; line-height: 1.55; }
+
+    .loading-pack { border: 1px solid var(--line); border-radius: 14px; background: white; padding: 24px; }
+    .loading-steps { display: grid; grid-template-columns: repeat(6, 1fr); gap: 7px; }
+    .loading-step { min-height: 76px; border: 1px solid var(--line); border-radius: 9px; padding: 9px; color: var(--muted); font-size: 8px; position: relative; overflow: hidden; }
+    .loading-step strong { display: block; color: var(--ink); font-size: 9px; margin-top: 6px; }
+    .loading-step.done::before, .loading-step.active::before { content: ""; position: absolute; inset: 0; background: linear-gradient(90deg, transparent, rgba(45,93,115,.08), transparent); animation: sweep 1.1s infinite; }
+    .loading-step.done { background: var(--success-soft); border-color: #c9ddd2; }
+    .loading-step.active { border-color: #b7cbd4; }
+    @keyframes sweep { from { transform: translateX(-100%); } to { transform: translateX(100%); } }
+
+    @media (max-width: 1160px) {
+      :root { --sidebar: 72px; }
+      .brand > div:last-child, .nav-button span:not(.nav-count), .nav-label, .connection-card, .profile-row > div:last-child { display: none; }
+      .brand { justify-content: center; padding-left: 0; padding-right: 0; }
+      .nav-button { justify-content: center; padding: 0; position: relative; }
+      .nav-count { position: absolute; right: 5px; top: 3px; }
+      .profile-row { justify-content: center; padding-left: 0; padding-right: 0; }
+      .reader-grid { grid-template-columns: 54px minmax(420px,1fr) 340px; }
+      .reader-left .left-tabs, .reader-left .outline-item span:not(.page-num), .reader-left .topic-context { display: none; }
+      .outline-item { justify-content: center; padding: 8px 2px; }
+      .outline-item .page-num { margin: 0; }
+    }
+
+    @media (max-width: 900px) {
+      .paper-grid { grid-template-columns: 1fr; }
+      .discover-hero { grid-template-columns: 1fr; }
+      .hero-side { display: none; }
+      .metric-grid { grid-template-columns: repeat(2, 1fr); }
+      .sync-grid { grid-template-columns: 1fr; }
+      .knowledge-layout { grid-template-columns: 1fr; }
+      .reader-grid { grid-template-columns: minmax(0,1fr) 330px; }
+      .reader-left { display: none; }
+      .global-search { display: none; }
+    }
+
+    @media (max-width: 700px) {
+      :root { --sidebar: 0px; }
+      .app-shell { grid-template-columns: minmax(0, 1fr); }
+      .workspace { grid-column: 1; min-width: 0; }
+      .sidebar { display: none; }
+      .topbar { padding: 0 12px; }
+      .page { padding: 22px 15px 44px; }
+      .crumb { min-width: 0; }
+      .top-actions { margin-left: auto; }
+      .composer-main { grid-template-columns: 1fr; }
+      .pack-header { flex-direction: column; gap: 12px; }
+      .pack-actions { margin-left: 0; width: 100%; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .pack-actions .secondary-button { width: 100%; }
+      .role-legend { flex-wrap: wrap; }
+      .legend-note { width: 100%; margin-left: 0; }
+      .supplement-rail, .field-grid { grid-template-columns: 1fr; }
+      .reader-grid { grid-template-columns: 1fr; }
+      .research-panel { display: none; }
+      .pdf-stage { padding: 15px 8px 50px; }
+      .pdf-page { padding: 38px 28px 58px; min-height: 840px; }
+      .reader-title strong { max-width: 220px; }
+      .toolbar-state, .reader-toolbar .secondary-button span { display: none; }
+      .settings-layout { grid-template-columns: 1fr; }
+      .settings-nav { grid-template-columns: repeat(3, 1fr); }
+    }
+  </style>
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar" aria-label="主导航">
+      <div class="brand">
+        <div class="brand-mark" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M5 5.5h7.2A3.8 3.8 0 0 1 16 9.3V19H8.8A3.8 3.8 0 0 1 5 15.2V5.5Z"/><path d="M9 5.5h6.2A3.8 3.8 0 0 1 19 9.3V16"/><path d="M9 9.5h4M9 12.5h5M9 15.5h3"/></svg>
+        </div>
+        <div><div class="brand-name">PaperWeave</div><div class="brand-cn">论织 · Research workspace</div></div>
+      </div>
+      <div class="nav-label">Workspace</div>
+      <nav class="nav-list" id="mainNav"></nav>
+      <div class="sidebar-spacer"></div>
+      <div class="connection-card">
+        <div class="connection-title">本地工作区</div>
+        <div class="connection-row"><span class="dot"></span><strong>Zotero</strong><span>可写</span></div>
+        <div class="connection-row"><span class="dot"></span><strong>Git</strong><span>clean</span></div>
+        <div class="connection-row"><span class="dot warning"></span><strong>LLM</strong><span>BYOK</span></div>
+      </div>
+      <div class="profile-row"><div class="avatar">A</div><div><strong>Arthur's Lab</strong><span>Local workspace</span></div></div>
+    </aside>
+
+    <main class="workspace">
+      <header class="topbar" id="topbar"></header>
+      <div id="viewHost"></div>
+    </main>
+  </div>
+
+  <div id="modalRoot"></div>
+  <div id="paletteRoot"></div>
+  <div id="toastStack" aria-live="polite"></div>
+
+  <script>
+    const ICONS = {
+      search: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4 4"/></svg>',
+      compass: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="12" cy="12" r="8.5"/><path d="m15.4 8.6-2.1 4.7-4.7 2.1 2.1-4.7 4.7-2.1Z"/></svg>',
+      library: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M5 4.5h4v15H5zM10.5 4.5h3.7v15h-3.7zM16 5.8l3.2-.8 3.2 13.6-3.2.8z"/></svg>',
+      reading: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M3.8 5.5h6A3.2 3.2 0 0 1 13 8.7v10.1H7a3.2 3.2 0 0 1-3.2-3.2V5.5Z"/><path d="M13 8.7a3.2 3.2 0 0 1 3.2-3.2h4v10.1a3.2 3.2 0 0 1-3.2 3.2h-4"/></svg>',
+      knowledge: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="6" cy="7" r="2.2"/><circle cx="18" cy="6" r="2.2"/><circle cx="12" cy="18" r="2.2"/><path d="m7.8 8.3 3 7.5M16.2 7.5l-3 8.3M8.1 6.8l7.7-.5"/></svg>',
+      sync: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M19 8a7.5 7.5 0 0 0-12.6-2L4 8.5"/><path d="M4 4v4.5h4.5M5 16a7.5 7.5 0 0 0 12.6 2l2.4-2.5"/><path d="M20 20v-4.5h-4.5"/></svg>',
+      settings: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="12" cy="12" r="3"/><path d="M19.2 13.8a7.8 7.8 0 0 0 0-3.6l2-1.5-2-3.4-2.5 1a8 8 0 0 0-3.1-1.8L13.2 2H9.3L9 4.5a8 8 0 0 0-3.1 1.8l-2.4-1-2 3.4 2 1.5a7.8 7.8 0 0 0 0 3.6l-2 1.5 2 3.4 2.4-1a8 8 0 0 0 3.1 1.8l.4 2.5h3.9l.4-2.5a8 8 0 0 0 3.1-1.8l2.5 1 2-3.4-2.1-1.5Z"/></svg>',
+      spark: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M12 2.8 13.8 9l6.2 1.8-6.2 1.8L12 19l-1.8-6.4L4 10.8 10.2 9 12 2.8Z"/><path d="m19 16 .8 2.2L22 19l-2.2.8L19 22l-.8-2.2L16 19l2.2-.8L19 16Z"/></svg>',
+      refresh: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M20 7v5h-5"/><path d="M18.2 16A7.5 7.5 0 1 1 19.7 9"/></svg>',
+      tune: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M4 7h10M18 7h2M4 17h2M10 17h10M14 4v6M6 14v6"/></svg>',
+      pin: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="m9 3 6 1-1 5 3 3-4 1-2 8-2-7-4-1 4-4V3Z"/></svg>',
+      file: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M6 3.5h8l4 4v13H6z"/><path d="M14 3.5v4h4M9 12h6M9 15h6"/></svg>',
+      check: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m5 12.5 4.2 4.2L19 7"/></svg>',
+      git: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="7" cy="5" r="2"/><circle cx="17" cy="19" r="2"/><circle cx="7" cy="19" r="2"/><path d="M7 7v10M9 6.5c5 0 6 2.5 6 5.5v5"/></svg>',
+      zotero: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M5 4h14L6 20h13"/></svg>',
+      arrow: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M5 12h14M14 7l5 5-5 5"/></svg>',
+      back: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M19 12H5M10 7l-5 5 5 5"/></svg>',
+      close: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="m6 6 12 12M18 6 6 18"/></svg>',
+      info: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="12" cy="12" r="9"/><path d="M12 10v7M12 7h.01"/></svg>',
+      layers: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="m12 3 9 5-9 5-9-5 9-5Z"/><path d="m3 12 9 5 9-5M3 16l9 5 9-5"/></svg>',
+      shield: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M12 3 20 6v5.5c0 4.5-3.1 7.9-8 9.5-4.9-1.6-8-5-8-9.5V6l8-3Z"/><path d="m8.5 12 2.2 2.2 4.8-5"/></svg>',
+      quote: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M5 6h6v6H7c0 3-1 4.5-3 6M14 6h6v6h-4c0 3-1 4.5-3 6"/></svg>',
+      eye: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M3 12s3.2-6 9-6 9 6 9 6-3.2 6-9 6-9-6-9-6Z"/><circle cx="12" cy="12" r="2.5"/></svg>',
+      edit: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="m14 5 5 5L9 20H4v-5L14 5Z"/><path d="m12 7 5 5"/></svg>',
+      trash: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M4 7h16M9 3h6l1 4H8l1-4ZM7 7l1 14h8l1-14M10 11v6M14 11v6"/></svg>',
+      message: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M4 4.5h16v12H9l-5 4v-16Z"/></svg>',
+      target: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="4"/><circle cx="12" cy="12" r="1"/></svg>',
+      route: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="6" cy="5" r="2"/><circle cx="18" cy="19" r="2"/><path d="M6 7v4c0 2 1 3 3 3h6c2 0 3 1 3 3M13 5h5v5"/></svg>',
+      bell: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M6 10a6 6 0 0 1 12 0v5l2 2H4l2-2v-5ZM10 20h4"/></svg>',
+      more: '<svg viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.7"/><circle cx="12" cy="12" r="1.7"/><circle cx="19" cy="12" r="1.7"/></svg>'
+    };
+
+    const ROLE_LABELS = {
+      foundation: '基石', frontier: '当前发展', counterpoint: '反方视角', bridge: '桥梁 / 综述', resource: '资源 / 复现'
+    };
+
+    const THEMES = {
+      emergence: {
+        key: 'emergence', label: '大语言模型的“涌现能力”是真实相变，还是度量假象？', short: 'LLM 涌现能力争议',
+        description: '从规模定律与能力跃迁的原始主张出发，加入 BIG-Bench / PaLM 等经验发展，并用连续度量、阈值选择与替代解释审查“离散涌现”。',
+        assumptions: ['关注语言模型能力随规模变化', '区分能力本身与评测指标', '优先原始工作与方法学批评'],
+        papers: {
+          foundation: [
+            { id:'kaplan2020', title:'Scaling Laws for Neural Language Models', authors:'Kaplan et al.', year:2020, venue:'arXiv', confidence:91, reason:'提供参数、数据和算力之间的连续规模规律，是理解“何时出现能力跃迁”的前置框架。', access:'OA PDF', zotero:'已在库中', mode:'深读', pages:30 },
+            { id:'brown2020', title:'Language Models are Few-Shot Learners', authors:'Brown et al.', year:2020, venue:'NeurIPS', confidence:87, reason:'大规模模型少样本能力成为后续“涌现”叙事的重要经验起点。', access:'OA PDF', zotero:'有条目', mode:'查证', pages:75 },
+            { id:'wei2022', title:'Emergent Abilities of Large Language Models', authors:'Wei et al.', year:2022, venue:'TMLR', confidence:96, reason:'直接定义并系统展示若干随规模出现的非线性能力，是本争议的核心主张来源。', access:'OA PDF', zotero:'未入库', mode:'深读', pages:33 }
+          ],
+          frontier: [
+            { id:'srivastava2022', title:'Beyond the Imitation Game: Quantifying and Extrapolating the Capabilities of Language Models', authors:'Srivastava et al.', year:2022, venue:'TMLR', confidence:88, reason:'BIG-Bench 扩展了任务空间，为观察跨任务能力曲线和潜在断点提供基础。', access:'OA PDF', zotero:'未入库', mode:'略读', pages:120 },
+            { id:'chowdhery2022', title:'PaLM: Scaling Language Modeling with Pathways', authors:'Chowdhery et al.', year:2022, venue:'JMLR', confidence:86, reason:'在更大规模上报告多任务能力变化，可检验涌现现象是否跨模型族出现。', access:'OA PDF', zotero:'有条目', mode:'查证', pages:87 },
+            { id:'du2024', title:'Predicting Emergent Capabilities by Finite Scaling Analysis', authors:'Du et al.', year:2024, venue:'Demo corpus', confidence:73, reason:'代表试图在训练前预测能力拐点的近期研究方向；需重点审查外推假设。', access:'Metadata only', zotero:'未入库', mode:'略读', pages:18 }
+          ],
+          counterpoint: [
+            { id:'schaeffer2023', title:'Are Emergent Abilities of Large Language Models a Mirage?', authors:'Schaeffer, Miranda & Koyejo', year:2023, venue:'NeurIPS', confidence:97, reason:'论证部分涌现曲线可由非线性或离散评测指标产生，是最直接的方法学反方。', access:'OA PDF', zotero:'已在库中', mode:'深读', pages:14 },
+            { id:'lu2024', title:'Emergence or Smooth Scaling? Re-examining Capability Transitions with Continuous Metrics', authors:'Lu et al.', year:2024, venue:'Demo corpus', confidence:78, reason:'以连续评分与不确定性区间重新分析跃迁，构成“边界条件＋替代测量”的反方。', access:'OA PDF', zotero:'未入库', mode:'查证', pages:22 }
+          ],
+          bridge: [
+            { id:'bommasani2021', title:'On the Opportunities and Risks of Foundation Models', authors:'Bommasani et al.', year:2021, venue:'Stanford CRFM', confidence:77, reason:'把规模、能力与社会技术问题连接为更宽的基础模型框架。', access:'OA PDF', zotero:'未入库', mode:'参考', pages:210 }
+          ],
+          resource: [
+            { id:'benchmark-card', title:'Emergence Metric Audit Checklist', authors:'PaperWeave template', year:2026, venue:'Research resource', confidence:100, reason:'用于逐项核验阈值、指标连续性、置信区间、模型族和任务选择偏差。', access:'Local template', zotero:'不适用', mode:'参考', pages:4 }
+          ]
+        }
+      },
+      rag: {
+        key:'rag', label:'如何可信地评估检索增强生成（RAG）系统？', short:'RAG 评估方法',
+        description:'覆盖 RAG 原始范式、知识密集基准、自动评估框架、检索与生成归因，并加入“长上下文并不等于有效使用证据”的反方证据。',
+        assumptions:['同时评价检索与生成', '关注可归因性而非单一答案分数', '优先有可复现实验的评估方法'],
+        papers:{
+          foundation:[
+            {id:'lewis2020',title:'Retrieval-Augmented Generation for Knowledge-Intensive NLP Tasks',authors:'Lewis et al.',year:2020,venue:'NeurIPS',confidence:97,reason:'提出经典 RAG 形式，明确检索器与生成器的联合建模，是评估对象的定义起点。',access:'OA PDF',zotero:'已在库中',mode:'深读',pages:19},
+            {id:'guu2020',title:'REALM: Retrieval-Augmented Language Model Pre-Training',authors:'Guu et al.',year:2020,venue:'ICML',confidence:83,reason:'展示预训练阶段的可学习检索，为比较不同 RAG 范式提供基线。',access:'OA PDF',zotero:'有条目',mode:'略读',pages:17},
+            {id:'petroni2021',title:'KILT: a Benchmark for Knowledge Intensive Language Tasks',authors:'Petroni et al.',year:2021,venue:'NAACL',confidence:89,reason:'将答案质量与证据来源统一到知识密集任务基准，是端到端评估的重要基础。',access:'OA PDF',zotero:'未入库',mode:'深读',pages:21}
+          ],
+          frontier:[
+            {id:'ragas2023',title:'RAGAS: Automated Evaluation of Retrieval Augmented Generation',authors:'Es et al.',year:2023,venue:'EACL demo',confidence:93,reason:'提出无需完整人工标注的多维自动指标，直接对应当前工程实践。',access:'OA PDF',zotero:'未入库',mode:'深读',pages:8},
+            {id:'ares2024',title:'ARES: An Automated Evaluation Framework for Retrieval-Augmented Generation Systems',authors:'Saad-Falcon et al.',year:2024,venue:'NAACL',confidence:90,reason:'以合成训练数据和少量人工样本训练评判器，适合比较自动评估可靠性。',access:'OA PDF',zotero:'未入库',mode:'查证',pages:19},
+            {id:'ragneed2025',title:'Attribution-first Evaluation for Multi-hop RAG',authors:'Demo authors',year:2025,venue:'Demo corpus',confidence:72,reason:'代表把答案、证据覆盖和推理链归因联合评估的近期方向。',access:'Metadata only',zotero:'未入库',mode:'略读',pages:16}
+          ],
+          counterpoint:[
+            {id:'lostmiddle2023',title:'Lost in the Middle: How Language Models Use Long Contexts',authors:'Liu et al.',year:2023,venue:'TACL',confidence:85,reason:'证明提供相关上下文不等于模型有效利用，限制仅以检索命中率评估 RAG 的有效性。',access:'OA PDF',zotero:'已在库中',mode:'深读',pages:18},
+            {id:'judgebias2024',title:'On the Reliability of LLM-as-a-Judge for RAG Evaluation',authors:'Demo authors',year:2024,venue:'Demo corpus',confidence:81,reason:'审查自动评判器的偏差与校准，构成对“低成本全自动评估”的方法学反方。',access:'OA PDF',zotero:'未入库',mode:'查证',pages:20}
+          ],
+          bridge:[{id:'rag-survey',title:'Retrieval-Augmented Generation for Large Language Models: A Survey',authors:'Gao et al.',year:2023,venue:'arXiv',confidence:82,reason:'连接 RAG 架构、检索增强阶段与评估维度。',access:'OA PDF',zotero:'未入库',mode:'参考',pages:24}],
+          resource:[{id:'rag-eval-card',title:'RAG Evaluation Protocol Card',authors:'PaperWeave template',year:2026,venue:'Research resource',confidence:100,reason:'将检索召回、上下文利用、答案正确性、忠实度与成本拆成可复现实验字段。',access:'Local template',zotero:'不适用',mode:'参考',pages:5}]
+        }
+      },
+      scaling: {
+        key:'scaling', label:'神经网络规模定律如何改变最优训练与数据配置？', short:'神经规模定律',
+        description:'从经验规模律、计算最优训练到数据重复、架构差异与外推失败，建立“连续趋势—资源决策—适用边界”的阅读路径。',
+        assumptions:['关注语言模型训练', '比较参数/数据/计算的资源配置', '要求明确外推范围'],
+        papers:{
+          foundation:[
+            {id:'hestness2017',title:'Deep Learning Scaling is Predictable, Empirically',authors:'Hestness et al.',year:2017,venue:'arXiv',confidence:84,reason:'较早系统展示多任务误差随数据与模型规模的幂律趋势。',access:'OA PDF',zotero:'未入库',mode:'略读',pages:17},
+            {id:'kaplan2020',title:'Scaling Laws for Neural Language Models',authors:'Kaplan et al.',year:2020,venue:'arXiv',confidence:98,reason:'建立语言模型损失与参数、数据、计算之间的经验幂律关系。',access:'OA PDF',zotero:'已在库中',mode:'深读',pages:30},
+            {id:'henighan2020',title:'Scaling Laws for Autoregressive Generative Modeling',authors:'Henighan et al.',year:2020,venue:'arXiv',confidence:79,reason:'把规模规律扩展到图像、视频与数学等生成域，检验跨模态稳定性。',access:'OA PDF',zotero:'有条目',mode:'查证',pages:38}
+          ],
+          frontier:[
+            {id:'hoffmann2022',title:'Training Compute-Optimal Large Language Models',authors:'Hoffmann et al.',year:2022,venue:'NeurIPS',confidence:98,reason:'重新估计计算最优参数/数据比例，直接改变大模型训练配置。',access:'OA PDF',zotero:'已在库中',mode:'深读',pages:31},
+            {id:'muennighoff2023',title:'Scaling Data-Constrained Language Models',authors:'Muennighoff et al.',year:2023,venue:'NeurIPS',confidence:88,reason:'研究高质量数据受限和重复训练条件下的规模规律。',access:'OA PDF',zotero:'未入库',mode:'查证',pages:23},
+            {id:'bi2024',title:'Beyond Chinchilla: Accounting for Inference in Language Model Scaling Laws',authors:'Demo authors',year:2024,venue:'Demo corpus',confidence:75,reason:'把部署推理成本纳入训练最优决策，代表从单阶段计算向全生命周期优化扩展。',access:'Metadata only',zotero:'未入库',mode:'略读',pages:18}
+          ],
+          counterpoint:[
+            {id:'architecturescaling',title:'How Architecture and Data Quality Bend Neural Scaling Laws',authors:'Demo authors',year:2023,venue:'Demo corpus',confidence:76,reason:'说明单一幂律参数在架构与数据分布变化时可能失效，构成边界条件。',access:'OA PDF',zotero:'未入库',mode:'查证',pages:20},
+            {id:'externalvalidity',title:'Limits of Extrapolating Language Model Scaling Curves',authors:'Demo authors',year:2024,venue:'Demo corpus',confidence:80,reason:'审查小规模拟合到超大规模的外推不确定性与选择偏差。',access:'OA PDF',zotero:'未入库',mode:'深读',pages:16}
+          ],
+          bridge:[{id:'scaling-review',title:'A Practical Review of Neural Scaling Laws',authors:'Demo authors',year:2024,venue:'Demo corpus',confidence:72,reason:'连接经验拟合、计算最优与组织层面的资源决策。',access:'OA PDF',zotero:'未入库',mode:'参考',pages:26}],
+          resource:[{id:'scaling-audit',title:'Scaling-law Fit & Extrapolation Checklist',authors:'PaperWeave template',year:2026,venue:'Research resource',confidence:100,reason:'记录拟合区间、损失定义、置信区间、数据重复与外推倍数。',access:'Local template',zotero:'不适用',mode:'参考',pages:4}]
+        }
+      }
+    };
+
+    const navItems = [
+      ['discover','发现',ICONS.compass], ['library','文献库',ICONS.library], ['reading','阅读',ICONS.reading],
+      ['knowledge','知识',ICONS.knowledge], ['sync','同步',ICONS.sync], ['settings','设置',ICONS.settings]
+    ];
+
+    const state = {
+      view: 'discover', themeKey: 'emergence', packGenerated: true, loadingStep: 0, pinned: new Set(['wei2022']),
+      selectedPaper: null, readerTab: 'guide', review: {}, editingClaim: null, userNotes: {}, chats: {},
+      zoteroLinked: true, gitCommitted: false, modelConfigured: true, counterpointOn: true, oaOnly: false,
+      query: THEMES.emergence.label, settingsTab: 'models', syncCompleted: false, paletteOpen: false
+    };
+
+    function esc(value='') {
+      return String(value).replace(/[&<>'"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));
+    }
+
+    function allPapers(theme = THEMES[state.themeKey]) {
+      return Object.values(theme.papers).flat();
+    }
+
+    function findPaper(id) {
+      for (const theme of Object.values(THEMES)) {
+        const p = Object.values(theme.papers).flat().find(x => x.id === id);
+        if (p) return { paper:p, theme };
+      }
+      return null;
+    }
+
+    function roleOfPaper(id, theme = THEMES[state.themeKey]) {
+      return Object.keys(theme.papers).find(role => theme.papers[role].some(p => p.id === id)) || 'foundation';
+    }
+
+    function currentTheme() { return THEMES[state.themeKey]; }
+
+    function navCount(key) {
+      if (key === 'library') return 18;
+      if (key === 'reading') return 3;
+      if (key === 'knowledge') return 12;
+      if (key === 'sync') return state.syncCompleted ? 0 : 2;
+      return null;
+    }
+
+    function renderNav() {
+      document.getElementById('mainNav').innerHTML = navItems.map(([key,label,icon]) => {
+        const active = state.view === key || (state.view === 'reader' && key === 'reading');
+        const count = navCount(key);
+        return `<button class="nav-button ${active?'active':''}" data-action="nav" data-view="${key}" aria-current="${active?'page':'false'}">${icon}<span>${label}</span>${count!==null?`<span class="nav-count">${count}</span>`:''}</button>`;
+      }).join('');
+    }
+
+    function renderTopbar() {
+      const titleMap = {
+        discover:['发现','构建平衡的论文阅读路径'], library:['文献库','Zotero 与本地工作区'], reading:['阅读','继续最近的研究会话'],
+        knowledge:['知识','经过审阅的研究记忆'], sync:['同步','外部写入与任务状态'], settings:['设置','本地工作区与模型'], reader:['论文阅读','证据、审阅与认知更新']
+      };
+      const [title,sub] = titleMap[state.view] || titleMap.discover;
+      document.getElementById('topbar').innerHTML = `
+        <div class="crumb"><div class="crumb-title">${title}</div><div class="crumb-sub">${sub}</div></div>
+        <div class="global-search">${ICONS.search}<input id="globalSearchInput" placeholder="搜索论文、Claim、主题或命令…" aria-label="全局搜索"><span class="search-key">⌘ K</span></div>
+        <div class="top-actions">
+          <button class="icon-button" data-action="open-sync-preview" title="同步预览" aria-label="同步预览">${ICONS.sync}</button>
+          <button class="icon-button" data-action="nav" data-view="settings" title="设置" aria-label="设置">${ICONS.settings}</button>
+          <button class="icon-button" data-action="show-toast" data-toast="这里将显示产品通知与长期主题更新。" title="通知" aria-label="通知">${ICONS.bell}</button>
+        </div>`;
+    }
+
+    function demoBanner() {
+      return `<div class="demo-banner">${ICONS.info}<div><strong>交互原型 · 静态演示数据。</strong> 不会联网、调用模型、读取 Zotero 或修改 Git；部分论文条目为用于验证交互的示例记录。</div></div>`;
+    }
+
+    function renderDiscover() {
+      const theme = currentTheme();
+      if (!state.packGenerated) return renderDiscoverEmpty();
+      if (state.loadingStep > 0) return renderDiscoverLoading();
+      return `<div class="page">
+        ${demoBanner()}
+        <section class="discover-hero">
+          <div class="hero-copy"><h1>把一个研究主题，变成有证据、有反方的阅读路径。</h1><p>PaperWeave 不只返回相似论文。它解释每篇为何是基石、当前发展或反方视角，并把阅读结果沉淀为可回到原文的研究知识。</p></div>
+          <div class="hero-side"><div class="micro-stat"><strong>9</strong><span>篇精编路径</span></div><div class="micro-stat"><strong>3</strong><span>种观点角色</span></div><div class="micro-stat"><strong>1</strong><span>个待验证问题</span></div></div>
+        </section>
+        ${topicComposer(theme)}
+        ${suggestionChips()}
+        <section>
+          <div class="pack-header">
+            <div><h2>${esc(state.query)}</h2><p>${esc(theme.description)}</p><div class="scope-line">${theme.assumptions.map(x=>`<span class="scope-tag">${esc(x)}</span>`).join('')}</div></div>
+            <div class="pack-actions"><button class="secondary-button" data-action="open-pack-rationale">${ICONS.layers}查看范围与缺口</button><button class="secondary-button" data-action="shuffle-theme">${ICONS.refresh}换一批</button></div>
+          </div>
+          <div class="role-legend"><div class="legend-item"><span class="legend-swatch foundation"></span>基石</div><div class="legend-item"><span class="legend-swatch frontier"></span>当前发展</div><div class="legend-item"><span class="legend-swatch counterpoint"></span>反方视角</div><div class="legend-note">按阅读价值编排，不按引用数简单排序 · Demo score v0.1</div></div>
+          <div class="paper-grid">
+            ${roleColumn('foundation', theme.papers.foundation)}
+            ${roleColumn('frontier', theme.papers.frontier)}
+            ${roleColumn('counterpoint', theme.papers.counterpoint)}
+          </div>
+          <div class="supplement-rail">
+            ${supplementCard('bridge', theme.papers.bridge[0])}
+            ${supplementCard('resource', theme.papers.resource[0])}
+          </div>
+        </section>
+      </div>`;
+    }
+
+    function renderDiscoverEmpty() {
+      return `<div class="page">${demoBanner()}<section class="discover-hero"><div class="hero-copy"><h1>你现在想真正理解什么问题？</h1><p>从关键词、研究问题、种子论文或一个 Zotero Collection 开始。系统会建立基石、前沿和反方并存的阅读路径。</p></div></section>${topicComposer(currentTheme())}${suggestionChips()}<div class="empty-state"><div class="empty-icon">${ICONS.compass}</div><h3>还没有生成阅读包</h3><p>输入一个具体问题，比输入宽泛领域更容易得到有意义的反方与阅读顺序。</p></div></div>`;
+    }
+
+    function renderDiscoverLoading() {
+      const steps = ['解释主题','多源召回','合并版本','构建引用图','寻找反方','编排顺序'];
+      return `<div class="page">${demoBanner()}<section class="discover-hero"><div class="hero-copy"><h1>正在把问题变成阅读路径。</h1><p>结果会逐步出现，但在角色稳定之前不会伪装成最终推荐。</p></div></section>${topicComposer(currentTheme())}<div class="loading-pack"><div class="loading-steps">${steps.map((s,i)=>`<div class="loading-step ${i+1<state.loadingStep?'done':i+1===state.loadingStep?'active':''}"><span>${String(i+1).padStart(2,'0')}</span><strong>${s}</strong></div>`).join('')}</div></div></div>`;
+    }
+
+    function topicComposer(theme) {
+      return `<div class="topic-composer">
+        <div class="composer-main"><div class="topic-input-wrap">${ICONS.search}<input class="topic-input" id="topicInput" value="${esc(state.query)}" aria-label="研究主题"></div><button class="primary-button" data-action="generate-pack">${ICONS.spark}<span>生成平衡阅读包</span></button></div>
+        <div class="composer-controls">
+          <label class="control-pill">阅读目标<select id="goalSelect"><option>深度研究</option><option>快速入门</option><option>复现评估</option><option>争议梳理</option></select></label>
+          <button class="control-pill ${state.counterpointOn?'on':''}" data-action="toggle-counterpoint"><span class="toggle"></span>强制寻找反方</button>
+          <button class="control-pill ${state.oaOnly?'on':''}" data-action="toggle-oa"><span class="toggle"></span>仅开放获取</button>
+          <label class="control-pill">经典性<select><option>平衡</option><option>偏经典</option><option>偏新颖</option></select></label>
+          <span class="composer-spacer"></span><button class="ghost-button" data-action="advanced-search">${ICONS.tune}高级约束</button>
+        </div>
+      </div>`;
+    }
+
+    function suggestionChips() {
+      return `<div class="suggestions"><span>建议主题</span>${Object.values(THEMES).map(t=>`<button class="topic-chip ${state.themeKey===t.key?'active':''}" data-action="choose-theme" data-theme="${t.key}">${esc(t.short)}</button>`).join('')}<button class="topic-chip" data-action="choose-theme" data-theme="custom">我的 Zotero 最近新增</button></div>`;
+    }
+
+    function roleColumn(role, papers) {
+      const desc = {foundation:'先建立概念与原始贡献',frontier:'理解当前方法与证据',counterpoint:'审查反证、边界与替代解释'}[role];
+      return `<div class="role-column"><div class="role-column-head"><h3>${ROLE_LABELS[role]}</h3><span>${desc}</span><span class="count">${papers.length}</span></div><div class="paper-stack">${papers.map(p=>paperCard(role,p)).join('')}</div></div>`;
+    }
+
+    function paperCard(role,p) {
+      const pinned = state.pinned.has(p.id);
+      return `<article class="paper-card ${role}" data-action="open-paper" data-paper="${p.id}" tabindex="0">
+        <div class="paper-topline"><span class="role-badge">${ROLE_LABELS[role]}</span><span class="confidence">角色置信度 ${p.confidence}%</span><button class="pin ${pinned?'pinned':''}" data-action="toggle-pin" data-paper="${p.id}" title="固定论文" aria-label="固定论文">${ICONS.pin}</button></div>
+        <h4 class="paper-title">${esc(p.title)}</h4><div class="paper-meta">${esc(p.authors)} · ${p.year} · ${esc(p.venue)}</div>
+        <div class="reason"><strong>为什么读：</strong>${esc(p.reason)}</div>
+        <div class="paper-status"><span class="status-mini">${ICONS.file}${esc(p.access)}</span><span class="status-mini">${ICONS.zotero}${esc(p.zotero)}</span><span class="status-mini">${ICONS.eye}${esc(p.mode)} · ${p.pages}p</span><span class="paper-card-actions"><button class="text-action" data-action="replace-paper" data-paper="${p.id}" data-role="${role}">替换</button><button class="text-action" data-action="open-paper" data-paper="${p.id}">开始阅读</button></span></div>
+      </article>`;
+    }
+
+    function supplementCard(role,p) {
+      return `<div class="supplement-card" data-action="open-paper" data-paper="${p.id}" tabindex="0"><div class="supplement-icon ${role}">${role==='bridge'?ICONS.route:ICONS.target}</div><div><strong>${esc(p.title)}</strong><span>${ROLE_LABELS[role]} · ${esc(p.reason)}</span></div><span class="arrow">${ICONS.arrow}</span></div>`;
+    }
+
+    function renderLibrary() {
+      const papers = allPapers();
+      return `<div class="page">${demoBanner()}<div class="section-heading"><div><h1>文献库</h1><p>Zotero 继续管理书目与附件；PaperWeave 管理阅读状态、Anchor 与研究理解。</p></div><div class="actions"><button class="secondary-button" data-action="show-toast" data-toast="本地 Zotero 重新扫描已加入任务队列。">${ICONS.refresh}扫描 Zotero</button><button class="primary-button" data-action="show-toast" data-toast="原型不会打开真实文件。">${ICONS.file}导入 PDF</button></div></div>
+        <div class="metric-grid"><div class="metric-card"><span>本地论文</span><strong>248</strong><small>197 篇有 PDF</small></div><div class="metric-card"><span>正在阅读</span><strong>3</strong><small>跨 2 个主题</small></div><div class="metric-card"><span>Verified EKU</span><strong>126</strong><small>28 天复用 38</small></div><div class="metric-card"><span>待审阅</span><strong>12</strong><small>含 3 条数字 Claim</small></div></div>
+        <div class="table-shell"><div class="table-toolbar"><button class="filter-button active">全部</button><button class="filter-button">阅读中</button><button class="filter-button">待审阅</button><button class="filter-button">无 PDF</button><button class="filter-button">同步冲突</button><input class="table-search" placeholder="筛选当前列表…"></div>
+          <table><thead><tr><th>论文</th><th>状态</th><th>主题角色</th><th>Zotero</th><th>待审阅</th><th>最后阅读</th></tr></thead><tbody>
+          ${papers.map((p,i)=>{const role=roleOfPaper(p.id); const st=i<2?'reading':i<6?'queued':'verified'; return `<tr data-action="open-paper" data-paper="${p.id}"><td class="title-cell"><strong>${esc(p.title)}</strong><span>${esc(p.authors)} · ${p.year}</span></td><td><span class="state-badge ${st}">${st==='reading'?'阅读中':st==='queued'?'已排队':'已验证'}</span></td><td>${ROLE_LABELS[role]}</td><td>${esc(p.zotero)}</td><td>${i%3===0?2:0}</td><td>${i<3?'今天':i<7?'3 天前':'7 月 22 日'}</td></tr>`}).join('')}
+          </tbody></table></div></div>`;
+    }
+
+    function renderReadingHome() {
+      const items = allPapers().slice(0,3);
+      return `<div class="page">${demoBanner()}<div class="section-heading"><div><h1>继续阅读</h1><p>恢复最近的页面、主题上下文和待审阅队列。</p></div></div>
+        <div class="paper-grid">${items.map((p,i)=>`<article class="paper-card ${roleOfPaper(p.id)}" data-action="open-paper" data-paper="${p.id}"><div class="paper-topline"><span class="role-badge">${ROLE_LABELS[roleOfPaper(p.id)]}</span><span class="confidence">${[42,68,19][i]}% 阅读覆盖</span></div><h4 class="paper-title">${esc(p.title)}</h4><div class="paper-meta">上次：第 ${[6,18,3][i]} 页 · ${[3,6,2][i]} 条待审阅</div><div class="reason"><strong>下一步：</strong>${['核验 Table 2 的连续指标是否改变结论。','完成作者局限并确认计算最优假设。','阅读方法节并建立检索/生成分层指标。'][i]}</div><button class="secondary-button small-button">继续阅读 ${ICONS.arrow}</button></article>`).join('')}</div></div>`;
+    }
+
+    function renderKnowledge() {
+      return `<div class="page">${demoBanner()}<div class="section-heading"><div><h1>主题知识 · ${esc(currentTheme().short)}</h1><p>只使用 Verified Claim 构建命题；AI 提议的合并仍需用户确认。</p></div><div class="actions"><button class="secondary-button" data-action="show-toast" data-toast="已创建一个待审阅的跨论文综合任务。">${ICONS.spark}重新综合</button></div></div>
+        <div class="metric-grid"><div class="metric-card"><span>已读论文</span><strong>5 / 9</strong><small>2 基石 · 2 前沿 · 1 反方</small></div><div class="metric-card"><span>Verified 命题</span><strong>12</strong><small>4 条存在分歧</small></div><div class="metric-card"><span>证据锚点</span><strong>47</strong><small>46 可精确回跳</small></div><div class="metric-card"><span>认知变化</span><strong>3</strong><small>最近一次：昨天</small></div></div>
+        <div class="knowledge-layout">
+          <section class="panel"><div class="panel-head"><strong>Proposition Matrix</strong><span>支持、反对、限定与不可比</span><button class="ghost-button right" data-action="show-toast" data-toast="矩阵已切换到线性无障碍视图。">线性视图</button></div><div class="matrix-wrap"><table class="matrix-table"><thead><tr><th>规范化命题</th><th>Wei 2022</th><th>PaLM</th><th>Schaeffer 2023</th><th>Continuous metrics</th></tr></thead><tbody>
+            <tr data-action="show-evidence-modal" data-proposition="能力曲线存在随模型规模出现的非线性跃迁"><td class="title-cell"><strong>能力曲线存在随模型规模出现的非线性跃迁</strong><span>需要区分任务能力与离散度量</span></td><td><span class="stance support">支持</span></td><td><span class="stance support">支持</span></td><td><span class="stance qualify">限定</span></td><td><span class="stance counter">反对</span></td></tr>
+            <tr data-action="show-evidence-modal" data-proposition="部分涌现可由评测指标的非线性产生"><td class="title-cell"><strong>部分“涌现”可由评测指标的非线性产生</strong><span>同一连续能力被阈值化后表现为断点</span></td><td><span class="stance incomparable">未检验</span></td><td><span class="stance incomparable">未检验</span></td><td><span class="stance support">支持</span></td><td><span class="stance support">支持</span></td></tr>
+            <tr data-action="show-evidence-modal" data-proposition="能力拐点能从较小模型可靠外推"><td class="title-cell"><strong>能力拐点能从较小模型可靠外推</strong><span>当前证据覆盖不足</span></td><td><span class="stance qualify">有限</span></td><td><span class="stance incomparable">未涉及</span></td><td><span class="stance counter">质疑</span></td><td><span class="stance counter">质疑</span></td></tr>
+            <tr data-action="show-evidence-modal" data-proposition="不同模型族共享相同的跃迁位置"><td class="title-cell"><strong>不同模型族共享相同的跃迁位置</strong><span>架构、数据与 prompting 不可比</span></td><td><span class="stance qualify">限定</span></td><td><span class="stance support">部分</span></td><td><span class="stance incomparable">不可比</span></td><td><span class="stance incomparable">不可比</span></td></tr>
+          </tbody></table></div></section>
+          <aside class="panel"><div class="panel-head"><strong>当前洞见</strong><span class="right">3 条待确认</span></div><div class="insight-list">
+            <div class="insight-item"><small>认知变化 · User verified</small><strong>我不再把“曲线看起来有断点”直接等同于能力本身发生离散相变。</strong><p>依据：Schaeffer 2023 的度量构造＋对 Wei 2022 图表的重新核验。</p></div>
+            <div class="insight-item"><small>研究缺口 · AI inference</small><strong>需要跨模型族、连续指标与预注册阈值的同协议比较。</strong><p>当前阅读包覆盖不足，不能据此声称该问题尚无人研究。</p></div>
+            <div class="insight-item"><small>下一步</small><strong>阅读一篇对能力拐点进行训练前预测的工作，并审查外推区间。</strong><p>将从 Frontier 中打开有限规模分析论文。</p></div>
+          </div></aside>
+        </div></div>`;
+    }
+
+    function renderSync() {
+      return `<div class="page">${demoBanner()}<div class="section-heading"><div><h1>同步中心</h1><p>“本地保存、写入 Zotero、Git commit、push GitHub”是四个独立状态。</p></div><div class="actions"><button class="primary-button" data-action="open-sync-preview">${ICONS.sync}预览全部变更</button></div></div>
+        <div class="sync-grid">
+          ${syncCard('Zotero',ICONS.zotero,'本地 API · 可写','已连接','Library 0','2 个待写 child notes','上次成功：10:42')}
+          ${syncCard('Local Git',ICONS.git,'research-notes/','clean','branch: main','3 个文件待渲染','上次 commit：昨天')}
+          ${syncCard('GitHub',ICONS.git,'arthur/research-notes','已授权','仅此仓库','默认不自动 push','上次 push：7 月 31 日')}
+        </div>
+        <section class="panel"><div class="panel-head"><strong>任务与活动</strong><span>每个跨系统动作都有幂等 Job 与诊断 ID</span></div><div class="activity-list">
+          ${activity('Zotero child note 写入成功','Emergent Abilities of Large Language Models · marker v1','今天 10:42')}
+          ${activity('PDF 解析完成','Schaeffer 2023 · 14 页 · 38 个结构块','今天 10:39')}
+          ${activity('Git 渲染等待确认','papers/wei2022/index.md · 2 个管理区块','今天 10:35')}
+          ${activity('主题包候选降级','Semantic Scholar 暂不可用；已使用 OpenAlex + Crossref 缓存','昨天 22:14')}
+        </div></section></div>`;
+    }
+
+    function syncCard(name,icon,sub,stateLabel,d1,d2,d3) {
+      return `<div class="sync-card"><div class="sync-card-head"><div class="service-mark">${icon}</div><div><strong>${name}</strong><span>${sub}</span></div><div class="sync-state">${stateLabel}</div></div><div class="sync-card-body"><div class="sync-detail"><span>范围</span><span>${d1}</span></div><div class="sync-detail"><span>状态</span><span>${d2}</span></div><div class="sync-detail"><span>记录</span><span>${d3}</span></div></div><div class="sync-card-actions"><button class="secondary-button small-button" data-action="show-toast" data-toast="连接状态已重新检查。">检查连接</button><button class="ghost-button small-button" data-action="open-sync-preview">查看计划</button></div></div>`;
+    }
+
+    function activity(title,sub,time) {
+      return `<div class="activity-row"><div class="activity-icon">${ICONS.check}</div><div><strong>${title}</strong><p>${sub}</p></div><time>${time}</time></div>`;
+    }
+
+    function renderSettings() {
+      return `<div class="page">${demoBanner()}<div class="section-heading"><div><h1>设置</h1><p>密钥只保存到系统钥匙串；原型不会实际保存输入。</p></div></div><div class="settings-layout">
+        <nav class="settings-nav">${[['models','模型与路由'],['workspace','工作区'],['zotero','Zotero'],['git','Git / GitHub'],['privacy','隐私与云端'],['parsing','PDF 与解析']].map(([k,l])=>`<button class="${state.settingsTab===k?'active':''}" data-action="settings-tab" data-tab="${k}">${l}</button>`).join('')}</nav>
+        ${settingsContent()}
+      </div></div>`;
+    }
+
+    function settingsContent() {
+      if (state.settingsTab === 'models') return `<section class="settings-section"><div class="settings-section-head"><h2>模型 Provider</h2><p>为分类、Claim 提取、深度综合、视觉和 Embedding 分别路由模型。</p></div><div class="settings-body"><div class="field-grid"><div class="field"><label>Profile 名称</label><input value="Research API"></div><div class="field"><label>Provider 类型</label><select><option>OpenAI-compatible</option><option>Local compatible server</option></select></div><div class="field full"><label>Base URL</label><input value="https://api.example.com/v1"></div><div class="field full"><label>API Key</label><input type="password" value="sk-paperweave-demo-key"><div class="field-note">保存后不可回读明文，只能替换或删除。该值为原型占位符。</div></div><div class="field"><label>Claim 提取</label><select><option>reasoning-model</option><option>fast-json-model</option></select></div><div class="field"><label>跨论文综合</label><select><option>reasoning-model</option></select></div><div class="field"><label>视觉/图表</label><select><option>vision-model</option></select></div><div class="field"><label>Embedding</label><select><option>embedding-model</option></select></div></div><div class="setting-row"><div><strong>允许发送整篇全文</strong><span>默认仅发送当前选区、章节与必要 Verified context。</span></div><button class="switch" data-action="toggle-setting"></button></div><div class="setting-row"><div><strong>保留模型原始响应 7 天</strong><span>用于诊断；可随时删除。</span></div><button class="switch on" data-action="toggle-setting"></button></div><div><button class="secondary-button" data-action="test-model">测试连接</button> <button class="primary-button" data-action="save-settings">保存 Profile</button></div></div></section>`;
+      if (state.settingsTab === 'privacy') return `<section class="settings-section"><div class="settings-section-head"><h2>隐私与数据流</h2><p>按数据类别控制本地、模型 Provider 和可选 PaperWeave Cloud。</p></div><div class="settings-body">${settingRow('PDF 与完整笔记只保留本地','默认开启；关闭需显式选择云同步。',true)}${settingRow('匿名产品分析','不包含标题、查询、正文、Anchor 或笔记。',false)}${settingRow('云端主题追踪','仅同步 Topic 定义与元数据 ID。',true)}${settingRow('自动清理原始模型响应','保留 7 天后删除。',true)}<button class="secondary-button" data-action="show-toast" data-toast="隐私中心将显示每个 Provider 收到过的数据类别。">查看数据流记录</button></div></section>`;
+      const map = {
+        workspace:['工作区','SQLite、缓存、备份与导出','/Users/arthur/Documents/PaperWeave'],
+        zotero:['Zotero','Local API、Library 与写入授权','http://localhost:23119/api/'],
+        git:['Git / GitHub','本地仓库、分支与远端权限','~/Documents/research-notes'],
+        parsing:['PDF 与解析','本地 Worker、OCR 与解析缓存','Docling local worker']
+      };
+      const [title,desc,value] = map[state.settingsTab] || map.workspace;
+      return `<section class="settings-section"><div class="settings-section-head"><h2>${title}</h2><p>${desc}</p></div><div class="settings-body"><div class="field"><label>当前配置</label><input value="${esc(value)}"></div>${settingRow('启动时检查连接','失败不会阻止本地阅读。',true)}${settingRow('在执行外部写入前显示预览','首次与冲突场景不可关闭。',true)}<div><button class="secondary-button" data-action="show-toast" data-toast="连接检查成功；这是原型模拟结果。">检查连接</button> <button class="primary-button" data-action="save-settings">保存设置</button></div></div></section>`;
+    }
+
+    function settingRow(title,sub,on) {
+      return `<div class="setting-row"><div><strong>${title}</strong><span>${sub}</span></div><button class="switch ${on?'on':''}" data-action="toggle-setting"></button></div>`;
+    }
+
+    function claimsFor(paper) {
+      const role = roleOfPaper(paper.id, findPaper(paper.id)?.theme || currentTheme());
+      const generic = [
+        {id:'c1',source:'作者主张 · Empirical',text: paper.id==='schaeffer2023' ? '使用非线性或离散指标时，底层连续且可预测的能力变化可以呈现为表面上的突发“涌现”。' : `该工作将“${paper.title.split(':')[0]}”中的核心现象表述为可由实验观察支持的主要结论。`,anchors:['anchor-abstract','anchor-result'],scope:'范围：本文报告的模型族、任务与评测设置；尚不能外推到所有能力。',confidence:84},
+        {id:'c2',source:'报告结果 · Quantitative',text: paper.id==='schaeffer2023' ? '在将不连续指标替换为连续评分后，若干原本显示断点的任务呈现出更平滑的规模曲线。' : '主实验中，目标方法在作者选择的主要设置上优于所列基线，但提升幅度依赖指标与任务切分。',anchors:['anchor-table','anchor-result'],scope:'需核验：绝对/相对提升、最佳值/均值、是否报告不确定性。',confidence:78},
+        {id:'c3',source:'AI 推断 · Boundary',text: role==='counterpoint' ? '该论文更适合被解释为对测量与可比性的限定，而不是证明所有相关主张都为假。' : '当前证据无法区分观察到的趋势来自方法机制、规模本身，还是数据与评测设计的共同变化。',anchors:['anchor-limit'],scope:'这是 AI 推断，需要用户确认；不可作为作者明确结论。',confidence:66}
+      ];
+      return generic;
+    }
+
+    function reviewStatus(paperId, claimId) {
+      return state.review[paperId]?.[claimId] || 'draft';
+    }
+
+    function acceptedCount(paperId) {
+      const entries = Object.values(state.review[paperId] || {});
+      return entries.filter(x=>x==='accepted'||x==='edited').length;
+    }
+
+    function renderReader() {
+      const hit = findPaper(state.selectedPaper);
+      if (!hit) { state.view='discover'; return renderDiscover(); }
+      const {paper,theme} = hit;
+      return `<div class="reader-shell">
+        <div class="reader-toolbar">
+          <button class="icon-button" data-action="back-from-reader" title="返回阅读包">${ICONS.back}</button>
+          <div class="reader-title"><strong>${esc(paper.title)}</strong><span>${esc(paper.authors)} · ${paper.year} · ${esc(paper.venue)} · published version</span></div>
+          <div class="toolbar-state"><span class="dot"></span>本地已保存</div>
+          <div class="toolbar-state">${acceptedCount(paper.id)} Verified · ${claimsFor(paper).length-acceptedCount(paper.id)} 待审阅</div>
+          <div class="tool-divider"></div>
+          <button class="secondary-button small-button" data-action="save-zotero">${ICONS.zotero}<span>${state.zoteroLinked?'已关联 Zotero':'存入 Zotero'}</span></button>
+          <button class="primary-button small-button" data-action="open-sync-preview">${ICONS.git}<span>${state.gitCommitted?'已 Commit':'同步 Git'}</span></button>
+          <button class="icon-button" data-action="show-toast" data-toast="版本、导出、重新解析等操作将放在此菜单。">${ICONS.more}</button>
+        </div>
+        <div class="reader-grid">
+          <aside class="reader-left"><div class="left-tabs"><button class="active">目录</button><button>缩略图</button><button>搜索</button></div><div class="outline">
+            <div class="topic-context"><small>当前阅读路径</small><strong>${esc(theme.short)} · ${ROLE_LABELS[roleOfPaper(paper.id,theme)]}</strong><p>${esc(paper.reason)}</p></div>
+            ${[['Abstract','anchor-abstract',1,1],['1 Introduction','anchor-intro',1,1],['2 Background','anchor-background',2,1],['3 Method','anchor-method',3,1],['3.1 Measurement','anchor-method',3,2],['4 Experiments','anchor-result',5,1],['4.2 Main results','anchor-table',6,2],['5 Limitations','anchor-limit',8,1],['References','anchor-ref',12,1]].map(([t,a,p,l],i)=>`<button class="outline-item ${l===2?'level-2':''} ${i===0?'active':''}" data-action="jump-anchor" data-anchor="${a}"><span>${t}</span><span class="page-num">${p}</span></button>`).join('')}
+          </div></aside>
+          <main class="pdf-stage" id="pdfStage">${paperPages(paper,theme)}</main>
+          <aside class="research-panel"><div class="research-tabs">${[['guide','阅读导引'],['ledger','证据账本'],['notes','我的笔记'],['ask','提问']].map(([k,l])=>`<button class="${state.readerTab===k?'active':''}" data-action="reader-tab" data-tab="${k}">${l}${k==='ledger'?`<span class="tab-count">${claimsFor(paper).filter(c=>reviewStatus(paper.id,c.id)==='draft').length}</span>`:''}</button>`).join('')}</div><div class="research-content">${readerPanel(paper,theme)}</div></aside>
+        </div>
+      </div>`;
+    }
+
+    function paperPages(paper,theme) {
+      const counter = roleOfPaper(paper.id,theme)==='counterpoint';
+      return `<article class="pdf-page"><h1 class="paper-headline">${esc(paper.title)}</h1><div class="paper-authors">${esc(paper.authors)}</div><div class="paper-affiliation">Interactive prototype paper view · demo text, not the original publication</div>
+        <section class="abstract-box" id="anchor-abstract"><h4>Abstract</h4><p><span class="evidence-source">We investigate how claims about ${esc(theme.short)} depend on the relationship between an underlying capability and the metric used to observe it.</span> Using controlled comparisons and re-analysis, the paper separates direct empirical observations from interpretations about qualitative transitions. The results motivate a more careful treatment of measurement, scale, and uncertainty.</p></section>
+        <div class="pdf-columns pdf-copy"><section id="anchor-intro"><h2>1&nbsp;&nbsp;Introduction</h2><p>Large models often exhibit performance changes that attract strong interpretations. Yet a plotted discontinuity can reflect a change in the system, a threshold in the metric, or an interaction between data, prompting and evaluation.</p><p><span class="evidence-source">The central question is not merely whether a score changes rapidly, but whether the evidence supports a distinct underlying transition under comparable conditions.</span></p></section>
+        <section id="anchor-background"><h2>2&nbsp;&nbsp;Background</h2><p>Prior work characterizes scaling with empirical curves and task-level evaluations. A binary exact-match metric, for example, may remain at zero until performance crosses a threshold, even when latent competence improves smoothly.</p><div class="paper-figure"><div class="figure-diagram"><div class="figure-node">Model scale</div><div class="figure-node">Latent capability</div><div class="figure-node">Observed metric</div></div><div class="figure-caption"><strong>Figure 1.</strong> Conceptual separation between scale, latent capability and the reported evaluation metric.</div></div></section>
+        <section id="anchor-method"><h2>3&nbsp;&nbsp;Method</h2><p>We compare multiple transformations of the same underlying performance signal and retain the task definition, model checkpoints and evaluation examples where possible.</p><p class="formula">m(x) = g(c(x)) + ε</p><p>Here, <em>c(x)</em> denotes a latent capability and <em>g</em> the observation function. This framing does not prove that capabilities are smooth; it exposes what additional evidence is required to distinguish the hypotheses.</p></section></div><div class="pdf-page-number">1</div></article>
+        <article class="pdf-page"><div class="pdf-columns pdf-copy"><section id="anchor-result"><h2>4&nbsp;&nbsp;Experiments</h2><p>We evaluate the competing interpretations across tasks and model sizes. <span class="evidence-source">When a continuous score replaces a thresholded metric, several apparent discontinuities become smoother and more predictable.</span> Other tasks retain uncertainty because checkpoints are sparse or the available metric is intrinsically discrete.</p>
+          <table class="paper-table" id="anchor-table"><thead><tr><th>Task</th><th>Original metric</th><th>Continuous metric</th><th>Interpretation</th></tr></thead><tbody><tr><td>Task A</td><td>Sharp</td><td>Smooth</td><td>Metric-sensitive</td></tr><tr><td>Task B</td><td>Sharp</td><td>Uncertain</td><td>Insufficient checkpoints</td></tr><tr><td>Task C</td><td>Gradual</td><td>Gradual</td><td>Consistent</td></tr></tbody><caption><strong>Table 2.</strong> Demonstration data for the interaction prototype. Values are not copied from the selected paper.</caption></table>
+          <h3>4.2&nbsp;&nbsp;Main results</h3><p><span class="evidence-source">The evidence supports a measurement-sensitive interpretation for a subset of tasks, but does not establish that every reported transition is an artifact.</span> Conclusions must be scoped to the evaluated tasks, checkpoints, prompts and metrics.</p></section>
+          <section id="anchor-limit"><h2>5&nbsp;&nbsp;Limitations</h2><p>Our analysis cannot directly observe latent capability, and alternative continuous metrics may introduce their own assumptions. Comparisons across model families remain difficult when training data, prompting and model access differ.</p><p><span class="evidence-source">Absence of a discontinuity under one metric is not proof that no meaningful qualitative change occurs elsewhere.</span></p></section>
+          <section><h2>6&nbsp;&nbsp;Discussion</h2><p>${counter?'For the current reading pack, this paper should be treated as a methodological counterpoint rather than a universal refutation.':'For the current reading pack, the paper contributes evidence that should be compared against the assigned counterpoint before accepting a broad interpretation.'}</p></section>
+          <section id="anchor-ref"><h2>References</h2><p>[1] Example reference used for the interaction prototype.<br>[2] All visible body text is synthetic and only demonstrates evidence anchors.</p></section>
+        </div><div class="pdf-page-number">2</div></article>`;
+    }
+
+    function readerPanel(paper,theme) {
+      if (state.readerTab === 'ledger') return ledgerPanel(paper);
+      if (state.readerTab === 'notes') return notesPanel(paper);
+      if (state.readerTab === 'ask') return askPanel(paper);
+      return guidePanel(paper,theme);
+    }
+
+    function guidePanel(paper,theme) {
+      return `<div class="panel-intro"><small>Pre-read · Full text parsed</small><h3>先形成阅读假设，再去核验证据。</h3><p>这不是最终总结。以下导引说明为什么读、先读哪里，以及哪些问题必须由你判断。</p></div>
+        <div class="guide-card"><div class="guide-card-head"><div class="guide-icon">${ICONS.target}</div><strong>为什么在当前路径中</strong></div><p>${esc(paper.reason)}</p></div>
+        <div class="guide-card"><div class="guide-card-head"><div class="guide-icon">${ICONS.route}</div><strong>推荐阅读路径</strong></div><div class="guide-list">
+          ${[['anchor-abstract','摘要','确认研究问题与证据范围'],['anchor-table','Table 2','比较原指标与连续指标的结论'],['anchor-result','主实验','检查“部分任务”是否被过度泛化'],['anchor-limit','局限','区分作者承认与 AI 推断']].map(([a,t,s],i)=>`<button class="guide-step" data-action="jump-anchor" data-anchor="${a}"><span class="step-num">${i+1}</span><span><strong>${t}</strong><span>${s}</span></span></button>`).join('')}
+        </div></div>
+        <div class="guide-card"><div class="guide-card-head"><div class="guide-icon">${ICONS.quote}</div><strong>阅读时需要验证</strong></div><div class="question-list"><div class="question-item">论文反驳的是能力跃迁本身，还是特定指标下的跃迁外观？</div><div class="question-item">任务、模型检查点和 prompting 是否足够可比？</div><div class="question-item">连续指标是否保留了任务真正关心的成功标准？</div><div class="question-item">结论适用于哪些任务，作者在哪些地方明确保留不确定性？</div></div></div>
+        <button class="primary-button" style="width:100%" data-action="reader-tab" data-tab="ledger">查看 ${claimsFor(paper).length} 条待审阅 Claim ${ICONS.arrow}</button>`;
+    }
+
+    function ledgerPanel(paper) {
+      const claims = claimsFor(paper);
+      const accepted = acceptedCount(paper.id);
+      return `<div class="panel-intro"><small>Evidence Ledger</small><h3>AI 提案不是你的知识。</h3><p>逐条检查原文、范围和认知来源；只有接受或编辑后的内容进入跨论文综合。</p></div><div class="review-summary"><div><strong>${accepted} / ${claims.length} 已验证</strong><span>数字与 AI 推断不支持批量接受</span></div><div class="review-progress">${Math.round(accepted/claims.length*100)}%</div></div>
+        ${claims.map(c=>claimCard(paper,c)).join('')}`;
+    }
+
+    function claimCard(paper,c) {
+      const status = reviewStatus(paper.id,c.id);
+      const editing = state.editingClaim === `${paper.id}:${c.id}`;
+      const statusLabel = status==='draft'?'Draft':status==='accepted'?'Verified':status==='edited'?'Verified · edited':'Rejected';
+      return `<article class="claim-card ${status}"><div class="claim-head"><span class="epistemic">${esc(c.source)}</span><span class="confidence">${c.confidence}%</span><span class="draft-badge ${status}">${statusLabel}</span></div>
+        ${editing?`<textarea class="claim-editor" id="claimEditText">${esc(c.text)}</textarea>`:`<p class="claim-text">${esc(c.text)}</p>`}
+        <div class="anchor-row">${c.anchors.map((a,i)=>`<button class="anchor-chip" data-action="jump-anchor" data-anchor="${a}">p.${i+1===1?'1':'2'} · ${a.replace('anchor-','')}</button>`).join('')}</div><div class="scope-note">${esc(c.scope)}</div>
+        <div class="claim-actions">
+          ${editing?`<button class="accept" data-action="save-claim-edit" data-paper="${paper.id}" data-claim="${c.id}">保存并验证</button><button data-action="cancel-claim-edit">取消</button>`:`<button class="accept" data-action="review-claim" data-status="accepted" data-paper="${paper.id}" data-claim="${c.id}">接受</button><button data-action="edit-claim" data-paper="${paper.id}" data-claim="${c.id}">编辑</button><button class="reject" data-action="review-claim" data-status="rejected" data-paper="${paper.id}" data-claim="${c.id}">驳回</button>`}
+          <span class="spacer"></span><button data-action="jump-anchor" data-anchor="${c.anchors[0]}">查看原文</button>
+        </div></article>`;
+    }
+
+    function notesPanel(paper) {
+      const val = state.userNotes[paper.id] || `# 我的判断\n\n读前预期：\n\n最强证据：\n\n我仍不相信：\n\n这篇如何改变我对主题的认识：\n\n下一步可检验行动：`;
+      return `<div class="panel-intro"><small>User-owned notes</small><h3>你的解释与 AI 草稿永久区分。</h3><p>可使用 @paper、@claim 和选区 Anchor；同步时仅管理带 marker 的结构化区块。</p></div><div class="editor-toolbar"><button title="标题">H</button><button title="粗体"><strong>B</strong></button><button title="Claim">C</button><button title="问题">?</button><button title="行动项">☐</button><span class="autosave">本地自动保存</span></div><textarea class="notes-editor" id="userNotes" data-paper="${paper.id}">${esc(val)}</textarea>`;
+    }
+
+    function askPanel(paper) {
+      const chats = state.chats[paper.id] || [];
+      return `<div class="panel-intro"><small>Grounded Q&A</small><h3>问题范围：当前论文＋Verified 主题知识</h3><p>论文中的文字是待分析数据，不能触发任何文件、Git 或 Zotero 操作。</p></div>
+        <div class="suggested-questions"><button data-action="ask-suggestion" data-question="这篇真正反驳了什么？">这篇真正反驳了什么？</button><button data-action="ask-suggestion" data-question="Table 2 的结论能否外推？">Table 2 能否外推？</button><button data-action="ask-suggestion" data-question="与主题包中基石论文的定义有何不同？">与基石论文定义有何不同？</button></div>
+        <div class="chat-history">${chats.length?chats.map(m=>`<div class="chat-message ${m.role}">${esc(m.text)}${m.role==='ai'?`<div class="chat-citations"><button class="anchor-chip" data-action="jump-anchor" data-anchor="anchor-result">p.2 · result</button><button class="anchor-chip" data-action="jump-anchor" data-anchor="anchor-limit">p.2 · limitations</button></div>`:''}</div>`).join(''):`<div class="chat-message ai">选择一个建议问题，或针对当前选区提问。回答中的事实必须能回到页面 Anchor。</div>`}</div>
+        <div class="ask-box"><textarea id="askInput" placeholder="询问方法、证据、范围或与已读论文的差异…"></textarea><div class="ask-actions"><select class="scope-select"><option>当前论文＋Verified 主题</option><option>当前章节</option><option>当前选区</option></select><button class="primary-button small-button" data-action="ask-submit">发送</button></div></div>`;
+    }
+
+    function renderView() {
+      renderNav(); renderTopbar();
+      const host = document.getElementById('viewHost');
+      host.innerHTML = state.view==='discover'?renderDiscover():state.view==='library'?renderLibrary():state.view==='reading'?renderReadingHome():state.view==='knowledge'?renderKnowledge():state.view==='sync'?renderSync():state.view==='settings'?renderSettings():state.view==='reader'?renderReader():renderDiscover();
+      host.scrollTop = 0;
+    }
+
+    function setView(view) {
+      state.view = view;
+      if (view !== 'reader') state.selectedPaper = null;
+      renderView();
+    }
+
+    function detectTheme(query) {
+      const q = query.toLowerCase();
+      if (/rag|检索增强|retrieval/.test(q)) return 'rag';
+      if (/规模|scaling|chinchilla|compute/.test(q)) return 'scaling';
+      return 'emergence';
+    }
+
+    function runPackGeneration() {
+      const input = document.getElementById('topicInput');
+      if (input) state.query = input.value.trim() || currentTheme().label;
+      state.themeKey = detectTheme(state.query);
+      state.packGenerated = true;
+      state.loadingStep = 1;
+      renderView();
+      let step = 1;
+      const timer = setInterval(()=>{
+        step += 1; state.loadingStep = step;
+        if (step > 6) { clearInterval(timer); state.loadingStep=0; state.query = state.query || currentTheme().label; renderView(); toast('阅读包已生成','已形成基石、当前发展、反方和桥梁；低置信度条目仍需核验。'); }
+        else renderView();
+      }, 260);
+    }
+
+    function openPaper(id) {
+      const hit = findPaper(id); if (!hit) return;
+      state.selectedPaper = id; state.view = 'reader'; state.readerTab = 'guide';
+      renderView();
+    }
+
+    function jumpAnchor(anchor) {
+      const el = document.getElementById(anchor);
+      if (!el) return;
+      el.scrollIntoView({behavior:'smooth',block:'center'});
+      const source = el.matches('.evidence-source') ? el : el.querySelector('.evidence-source') || el;
+      source.classList.add('flash'); setTimeout(()=>source.classList.remove('flash'),1400);
+    }
+
+    function toast(title, message='') {
+      const stack = document.getElementById('toastStack');
+      const node = document.createElement('div'); node.className='toast';
+      node.innerHTML = `<div class="toast-icon">${ICONS.check}</div><div><strong>${esc(title)}</strong><span>${esc(message)}</span></div>`;
+      stack.appendChild(node); setTimeout(()=>node.remove(), 4200);
+    }
+
+    function openModal(content) { document.getElementById('modalRoot').innerHTML = `<div class="modal-backdrop" data-action="backdrop-close"><div class="modal" role="dialog" aria-modal="true">${content}</div></div>`; }
+    function closeModal() { document.getElementById('modalRoot').innerHTML=''; }
+
+    function syncPreviewModal() {
+      const paper = state.selectedPaper ? findPaper(state.selectedPaper)?.paper : currentTheme().papers.foundation[2];
+      openModal(`<div class="modal-head"><div><h2>同步预览</h2><p>执行前明确区分 Zotero 写入、本地 Git commit 与 GitHub push。</p></div><button class="icon-button" data-action="close-modal">${ICONS.close}</button></div><div class="modal-body"><div class="sync-plan">
+        <div class="plan-group"><div class="plan-group-head">${ICONS.zotero}<strong>Zotero · Library 0</strong><span>2 个变更</span></div><div class="plan-row">${ICONS.check}<div><strong>关联现有顶层条目</strong><span>${esc(paper?.title||'Selected paper')} · 不创建重复条目</span></div></div><div class="plan-row">${ICONS.check}<div><strong>更新 PaperWeave child note</strong><span>只修改 data-paperweave-note="v1" 管理区块；用户笔记不变</span></div></div></div>
+        <div class="plan-group"><div class="plan-group-head">${ICONS.git}<strong>Local Git · research-notes/</strong><span>3 个文件</span></div><div class="plan-row">${ICONS.check}<div><strong>papers/${paper?.id||'paper'}/index.md</strong><span>更新 2 条 Verified Claim 和认知卡</span></div></div><div class="plan-row">${ICONS.check}<div><strong>papers/${paper?.id||'paper'}/claims.json</strong><span>结构化对象与 provenance</span></div></div><div class="plan-row">${ICONS.check}<div><strong>topics/${state.themeKey}/index.md</strong><span>更新阅读状态；不导出 PDF</span></div></div></div>
+        <div class="diff-box">commit: paperweave: verify notes for ${paper?.id||'paper'}\n\n<span class="diff-add">+ 2 verified claims</span>\n<span class="diff-add">+ 4 evidence anchors</span>\n<span class="diff-add">+ cognitive delta draft</span>\n\nGitHub push: OFF (manual)</div>
+      </div></div><div class="modal-foot"><button class="secondary-button" data-action="close-modal">取消</button><button class="primary-button" data-action="execute-sync">执行 Zotero 写入并 Commit</button></div>`);
+    }
+
+    function rationaleModal() {
+      openModal(`<div class="modal-head"><div><h2>主题范围、覆盖与已知缺口</h2><p>推荐角色是相对于当前阅读包的判断，不是论文永久标签。</p></div><button class="icon-button" data-action="close-modal">${ICONS.close}</button></div><div class="modal-body">
+        <div class="field-grid"><div class="guide-card"><strong>主题解释</strong><p style="margin-top:7px">${esc(currentTheme().description)}</p></div><div class="guide-card"><strong>数据源快照</strong><p style="margin-top:7px">OpenAlex：可用 · Crossref：可用 · Semantic Scholar：降级缓存 · Zotero：本地上下文</p></div></div>
+        <div class="guide-card"><strong>角色依据</strong><div class="question-list" style="margin-top:8px"><div class="question-item">基石：共同引用祖先、原始贡献、概念起源与当前主题相关性。</div><div class="question-item">前沿：近期相关、引用增长、新聚类中心与可用实验资产。</div><div class="question-item">反方：同一命题、引用语境、方法学批评、负结果或边界条件；不把普通替代方法当反方。</div></div></div>
+        <div class="guide-card"><strong>已知缺口</strong><p style="margin-top:7px">部分 2024–2026 条目使用原型演示记录；未核验所有数据源许可与当前全文可用性。真实产品必须显示字段来源、更新时间和置信度。</p></div>
+      </div><div class="modal-foot"><button class="primary-button" data-action="close-modal">了解</button></div>`);
+    }
+
+    function evidenceModal(proposition) {
+      openModal(`<div class="modal-head"><div><h2>命题证据</h2><p>${esc(proposition)}</p></div><button class="icon-button" data-action="close-modal">${ICONS.close}</button></div><div class="modal-body"><div class="review-summary"><div><strong>4 篇论文 · 7 条 Verified Claims</strong><span>“反对”不等于研究对象与设置完全可比</span></div><div class="review-progress">已审阅</div></div>
+        ${[['Wei 2022','support','将若干任务曲线描述为随规模出现的非线性能力。','p.4 · Figure 2'],['Schaeffer 2023','qualify','指出离散指标能从平滑潜在能力制造表面断点。','p.6 · Proposition 1'],['Continuous metrics','counter','在替代度量下观察到平滑曲线，但模型族覆盖有限。','p.8 · Table 3']].map(([p,s,t,a])=>`<div class="claim-card accepted"><div class="claim-head"><span class="epistemic">${p}</span><span class="draft-badge accepted">${s}</span></div><p class="claim-text">${t}</p><button class="anchor-chip">${a}</button></div>`).join('')}
+      </div><div class="modal-foot"><button class="secondary-button" data-action="close-modal">关闭</button><button class="primary-button" data-action="show-toast" data-toast="已创建一个用户确认命题合并的任务。">审阅命题合并</button></div>`);
+    }
+
+    function advancedModal() {
+      openModal(`<div class="modal-head"><div><h2>高级主题约束</h2><p>减少歧义而不阻塞生成；系统会把未确定项作为可编辑假设。</p></div><button class="icon-button" data-action="close-modal">${ICONS.close}</button></div><div class="modal-body"><div class="field-grid"><div class="field"><label>时间范围</label><input value="2017–2026"></div><div class="field"><label>论文数量</label><select><option>9–12</option><option>6–8</option><option>12–18</option></select></div><div class="field"><label>偏好</label><select><option>理论与实证平衡</option><option>偏理论</option><option>偏工程</option></select></div><div class="field"><label>全文策略</label><select><option>开放获取优先</option><option>仅 OA</option><option>不限制</option></select></div><div class="field full"><label>排除关键词/作者/venue</label><input placeholder="用逗号分隔"></div><div class="field full"><label>种子论文或 Zotero Collection</label><input value="Zotero / Research / LLM Evaluation"></div></div></div><div class="modal-foot"><button class="secondary-button" data-action="close-modal">取消</button><button class="primary-button" data-action="close-modal">应用约束</button></div>`);
+    }
+
+    function showPalette() {
+      state.paletteOpen=true;
+      const items = [
+        ['discover','创建新的平衡阅读包','输入主题、问题或种子论文',ICONS.compass,'N'],
+        ['library','打开文献库','搜索 Zotero、本地 PDF 与阅读状态',ICONS.library,'L'],
+        ['knowledge','查看主题命题矩阵','比较支持、反对、限定与不可比',ICONS.knowledge,'K'],
+        ['sync','预览 Zotero / Git 同步','执行外部写入前检查 diff',ICONS.sync,'S'],
+        ['settings','配置模型 Provider','BYOK、任务路由与隐私范围',ICONS.settings,',']
+      ];
+      document.getElementById('paletteRoot').innerHTML = `<div class="command-backdrop" data-action="palette-backdrop"><div class="command-palette"><input class="command-input" id="commandInput" placeholder="搜索论文、命令或主题…" autofocus><div class="command-results">${items.map(([v,t,s,i,k],idx)=>`<button class="command-item ${idx===0?'active':''}" data-action="command-nav" data-view="${v}">${i}<span><strong>${t}</strong><span>${s}</span></span><kbd>⌘${k}</kbd></button>`).join('')}</div></div></div>`;
+      setTimeout(()=>document.getElementById('commandInput')?.focus(),0);
+    }
+    function closePalette(){state.paletteOpen=false;document.getElementById('paletteRoot').innerHTML='';}
+
+    document.addEventListener('click', e => {
+      const actionEl = e.target.closest('[data-action]');
+      if (!actionEl) return;
+      const action = actionEl.dataset.action;
+      if (['toggle-pin','replace-paper'].includes(action)) e.stopPropagation();
+      if (action==='nav') setView(actionEl.dataset.view);
+      else if (action==='generate-pack') runPackGeneration();
+      else if (action==='choose-theme') {
+        const k=actionEl.dataset.theme;
+        if(k==='custom'){state.query='我最近加入 Zotero 的论文形成了哪些主题？';state.themeKey='emergence';}
+        else {state.themeKey=k;state.query=THEMES[k].label;}
+        state.packGenerated=true; renderView();
+      }
+      else if (action==='shuffle-theme') { const keys=Object.keys(THEMES); const i=(keys.indexOf(state.themeKey)+1)%keys.length; state.themeKey=keys[i]; state.query=currentTheme().label; renderView(); toast('已换一批','保留角色配比，并对历史结果去重。'); }
+      else if (action==='toggle-counterpoint') {state.counterpointOn=!state.counterpointOn;renderView();}
+      else if (action==='toggle-oa') {state.oaOnly=!state.oaOnly;renderView();}
+      else if (action==='open-paper') openPaper(actionEl.dataset.paper);
+      else if (action==='toggle-pin') {const id=actionEl.dataset.paper;state.pinned.has(id)?state.pinned.delete(id):state.pinned.add(id);renderView();}
+      else if (action==='replace-paper') {toast('替换候选已生成',`保留 ${ROLE_LABELS[actionEl.dataset.role]} 角色与已固定论文；原型不改变静态条目。`);}
+      else if (action==='back-from-reader') {state.view='discover';state.selectedPaper=null;renderView();}
+      else if (action==='reader-tab') {state.readerTab=actionEl.dataset.tab;renderView();}
+      else if (action==='jump-anchor') jumpAnchor(actionEl.dataset.anchor);
+      else if (action==='review-claim') {
+        const {paper,claim,status}=actionEl.dataset; state.review[paper] ||= {}; state.review[paper][claim]=status; renderView();
+        toast(status==='accepted'?'Claim 已验证':'Claim 已驳回',status==='accepted'?'它现在可进入主题综合与 Git 导出。':'驳回原因可作为本地个性化信号。');
+      }
+      else if (action==='edit-claim') {state.editingClaim=`${actionEl.dataset.paper}:${actionEl.dataset.claim}`;renderView();}
+      else if (action==='cancel-claim-edit') {state.editingClaim=null;renderView();}
+      else if (action==='save-claim-edit') {const {paper,claim}=actionEl.dataset;state.review[paper]||={};state.review[paper][claim]='edited';state.editingClaim=null;renderView();toast('用户修订已验证','保留“AI 起草，经用户编辑”的 provenance。');}
+      else if (action==='save-zotero') {state.zoteroLinked=true;renderView();toast('已关联 Zotero','原型模拟：匹配现有条目，不创建重复记录。');}
+      else if (action==='open-sync-preview') syncPreviewModal();
+      else if (action==='execute-sync') {state.gitCommitted=true;state.syncCompleted=true;closeModal();renderView();toast('同步任务完成','Zotero child note 已更新；Git 已本地 commit；未 push GitHub。');}
+      else if (action==='close-modal') closeModal();
+      else if (action==='backdrop-close' && e.target===actionEl) closeModal();
+      else if (action==='open-pack-rationale') rationaleModal();
+      else if (action==='advanced-search') advancedModal();
+      else if (action==='show-evidence-modal') evidenceModal(actionEl.dataset.proposition);
+      else if (action==='settings-tab') {state.settingsTab=actionEl.dataset.tab;renderView();}
+      else if (action==='toggle-setting') {actionEl.classList.toggle('on');}
+      else if (action==='test-model') toast('连接与能力检测通过','支持 streaming、JSON schema、vision；这是原型模拟结果。');
+      else if (action==='save-settings') toast('设置已保存','真实产品会把密钥写入系统钥匙串，而不是数据库。');
+      else if (action==='show-toast') toast('原型提示',actionEl.dataset.toast||'操作已记录。');
+      else if (action==='ask-suggestion') {const input=document.getElementById('askInput');if(input){input.value=actionEl.dataset.question;input.focus();}}
+      else if (action==='ask-submit') {
+        const input=document.getElementById('askInput');const q=input?.value.trim();if(!q)return;
+        const id=state.selectedPaper; state.chats[id] ||= []; state.chats[id].push({role:'user',text:q},{role:'ai',text:'这篇论文更直接限定的是“观察指标能否证明离散相变”，而不是证明所有能力变化都必然平滑。正文同时保留了对未覆盖任务和不同模型族的谨慎范围。'}); renderView();
+      }
+      else if (action==='command-nav') {const v=actionEl.dataset.view;closePalette();if(v==='sync')syncPreviewModal();else setView(v);}
+      else if (action==='palette-backdrop' && e.target===actionEl) closePalette();
+    });
+
+    document.addEventListener('input', e => {
+      if (e.target.id==='userNotes') {state.userNotes[e.target.dataset.paper]=e.target.value;}
+      if (e.target.id==='globalSearchInput' && e.target.value.trim()) showPalette();
+    });
+
+    document.addEventListener('keydown', e => {
+      if ((e.metaKey||e.ctrlKey) && e.key.toLowerCase()==='k') {e.preventDefault();state.paletteOpen?closePalette():showPalette();}
+      if (e.key==='Escape') {closeModal();closePalette();}
+      if (e.key==='Enter' && e.target.matches('.paper-card,.supplement-card')) openPaper(e.target.dataset.paper);
+    });
+
+    renderView();
+  </script>
+</body>
 </html>

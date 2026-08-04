@@ -1,0 +1,229 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://paperweave.local/schemas/note.schema.json",
+  "title": "PaperWeave AI Note Proposal Bundle",
+  "description": "Contract for model-generated note proposals. All generated objects remain draft until a user review action changes their state.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "paper_id", "paper_version_id", "task", "source_scope", "proposals", "warnings"],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "paper_id": { "$ref": "#/$defs/uuid" },
+    "paper_version_id": { "$ref": "#/$defs/uuid" },
+    "topic_id": { "anyOf": [{ "$ref": "#/$defs/uuid" }, { "type": "null" }] },
+    "task": {
+      "type": "string",
+      "enum": ["pre_read", "selection_analysis", "section_analysis", "post_read", "cross_paper_synthesis"]
+    },
+    "source_scope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["scope_type", "anchor_ids", "full_text_available"],
+      "properties": {
+        "scope_type": { "type": "string", "enum": ["abstract", "selection", "section", "paper", "verified_topic_knowledge"] },
+        "anchor_ids": { "type": "array", "items": { "$ref": "#/$defs/uuid" }, "uniqueItems": true },
+        "full_text_available": { "type": "boolean" },
+        "notes": { "type": "string", "maxLength": 1000 }
+      }
+    },
+    "proposals": {
+      "type": "array",
+      "maxItems": 50,
+      "items": {
+        "oneOf": [
+          { "$ref": "#/$defs/claimProposal" },
+          { "$ref": "#/$defs/noteBlockProposal" },
+          { "$ref": "#/$defs/relationshipProposal" }
+        ]
+      }
+    },
+    "warnings": {
+      "type": "array",
+      "maxItems": 20,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["code", "message", "severity"],
+        "properties": {
+          "code": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]{2,63}$" },
+          "message": { "type": "string", "minLength": 1, "maxLength": 1000 },
+          "severity": { "type": "string", "enum": ["info", "warning", "blocking"] },
+          "related_anchor_ids": { "type": "array", "items": { "$ref": "#/$defs/uuid" }, "uniqueItems": true }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "uuid": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "confidence": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1
+    },
+    "anchorRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["anchor_id", "support_type"],
+      "properties": {
+        "anchor_id": { "$ref": "#/$defs/uuid" },
+        "support_type": {
+          "type": "string",
+          "enum": ["direct_statement", "reported_result", "definition", "method_description", "limitation_statement", "figure", "table", "equation", "context"]
+        },
+        "quoted_fragment": { "type": ["string", "null"], "maxLength": 500 },
+        "notes": { "type": ["string", "null"], "maxLength": 500 }
+      }
+    },
+    "baseProposal": {
+      "type": "object",
+      "required": ["proposal_id", "object_type", "review_status", "created_by", "confidence", "confidence_basis"],
+      "properties": {
+        "proposal_id": { "$ref": "#/$defs/uuid" },
+        "object_type": { "type": "string" },
+        "review_status": { "const": "draft" },
+        "created_by": { "const": "ai" },
+        "confidence": { "$ref": "#/$defs/confidence" },
+        "confidence_basis": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 8,
+          "items": { "type": "string", "minLength": 1, "maxLength": 300 }
+        },
+        "needs_human_attention": { "type": "boolean", "default": false },
+        "attention_reason": { "type": ["string", "null"], "maxLength": 500 }
+      }
+    },
+    "claimProposal": {
+      "allOf": [
+        { "$ref": "#/$defs/baseProposal" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "proposal_id", "object_type", "review_status", "created_by", "confidence", "confidence_basis",
+            "claim_text", "claim_type", "epistemic_source", "evidence", "assumptions", "scope_conditions", "limitations"
+          ],
+          "properties": {
+            "proposal_id": { "$ref": "#/$defs/uuid" },
+            "object_type": { "const": "claim" },
+            "review_status": { "const": "draft" },
+            "created_by": { "const": "ai" },
+            "confidence": { "$ref": "#/$defs/confidence" },
+            "confidence_basis": { "type": "array", "minItems": 1, "maxItems": 8, "items": { "type": "string", "minLength": 1, "maxLength": 300 } },
+            "needs_human_attention": { "type": "boolean", "default": false },
+            "attention_reason": { "type": ["string", "null"], "maxLength": 500 },
+            "claim_text": { "type": "string", "minLength": 5, "maxLength": 1500 },
+            "claim_type": {
+              "type": "string",
+              "enum": ["theoretical", "empirical", "methodological", "descriptive", "interpretive", "normative"]
+            },
+            "epistemic_source": {
+              "type": "string",
+              "enum": ["direct_quote", "author_claim", "reported_result", "ai_inference", "external_metadata"]
+            },
+            "evidence": {
+              "type": "array",
+              "items": { "$ref": "#/$defs/anchorRef" },
+              "uniqueItems": true
+            },
+            "assumptions": { "type": "array", "maxItems": 12, "items": { "type": "string", "maxLength": 500 } },
+            "scope_conditions": { "type": "array", "maxItems": 12, "items": { "type": "string", "maxLength": 500 } },
+            "limitations": { "type": "array", "maxItems": 12, "items": { "type": "string", "maxLength": 500 } },
+            "quantities": {
+              "type": "array",
+              "maxItems": 20,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["raw_text", "meaning", "anchor_id"],
+                "properties": {
+                  "raw_text": { "type": "string", "maxLength": 200 },
+                  "meaning": { "type": "string", "maxLength": 500 },
+                  "anchor_id": { "$ref": "#/$defs/uuid" },
+                  "comparison_type": { "type": ["string", "null"], "enum": ["absolute", "relative", "ratio", "none", null] }
+                }
+              }
+            },
+            "candidate_tags": { "type": "array", "maxItems": 12, "items": { "type": "string", "maxLength": 80 }, "uniqueItems": true }
+          },
+          "allOf": [
+            {
+              "if": {
+                "properties": { "epistemic_source": { "enum": ["direct_quote", "author_claim", "reported_result"] } },
+                "required": ["epistemic_source"]
+              },
+              "then": { "properties": { "evidence": { "minItems": 1 } } }
+            },
+            {
+              "if": {
+                "properties": { "epistemic_source": { "const": "ai_inference" } },
+                "required": ["epistemic_source"]
+              },
+              "then": { "properties": { "needs_human_attention": { "const": true } } }
+            }
+          ]
+        }
+      ]
+    },
+    "noteBlockProposal": {
+      "allOf": [
+        { "$ref": "#/$defs/baseProposal" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["proposal_id", "object_type", "review_status", "created_by", "confidence", "confidence_basis", "note_type", "content", "evidence"],
+          "properties": {
+            "proposal_id": { "$ref": "#/$defs/uuid" },
+            "object_type": { "const": "note_block" },
+            "review_status": { "const": "draft" },
+            "created_by": { "const": "ai" },
+            "confidence": { "$ref": "#/$defs/confidence" },
+            "confidence_basis": { "type": "array", "minItems": 1, "maxItems": 8, "items": { "type": "string", "minLength": 1, "maxLength": 300 } },
+            "needs_human_attention": { "type": "boolean", "default": false },
+            "attention_reason": { "type": ["string", "null"], "maxLength": 500 },
+            "note_type": {
+              "type": "string",
+              "enum": ["summary", "method", "limitation", "question", "action_item", "reproduction", "definition"]
+            },
+            "title": { "type": ["string", "null"], "maxLength": 200 },
+            "content": { "type": "string", "minLength": 1, "maxLength": 5000 },
+            "evidence": { "type": "array", "items": { "$ref": "#/$defs/anchorRef" }, "uniqueItems": true },
+            "priority": { "type": "string", "enum": ["low", "medium", "high"] },
+            "due_context": { "type": ["string", "null"], "maxLength": 300 }
+          }
+        }
+      ]
+    },
+    "relationshipProposal": {
+      "allOf": [
+        { "$ref": "#/$defs/baseProposal" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["proposal_id", "object_type", "review_status", "created_by", "confidence", "confidence_basis", "source_claim_id", "target_claim_id", "relation_type", "evidence"],
+          "properties": {
+            "proposal_id": { "$ref": "#/$defs/uuid" },
+            "object_type": { "const": "claim_relationship" },
+            "review_status": { "const": "draft" },
+            "created_by": { "const": "ai" },
+            "confidence": { "$ref": "#/$defs/confidence" },
+            "confidence_basis": { "type": "array", "minItems": 1, "maxItems": 8, "items": { "type": "string", "minLength": 1, "maxLength": 300 } },
+            "needs_human_attention": { "type": "boolean", "default": true },
+            "attention_reason": { "type": ["string", "null"], "maxLength": 500 },
+            "source_claim_id": { "$ref": "#/$defs/uuid" },
+            "target_claim_id": { "$ref": "#/$defs/uuid" },
+            "relation_type": {
+              "type": "string",
+              "enum": ["supports", "counters", "qualifies", "incomparable", "depends_on", "replicates", "extends", "uses_different_definition", "uses_incomparable_setup", "supersedes"]
+            },
+            "explanation": { "type": "string", "minLength": 1, "maxLength": 1500 },
+            "evidence": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/anchorRef" }, "uniqueItems": true }
+          }
+        }
+      ]
+    }
+  }
+}

@@ -1,2 +1,0 @@
-# The automation intentionally uses only the Python 3.12 standard library.
-# Keep this file as the explicit dependency lock: there are no third-party packages.

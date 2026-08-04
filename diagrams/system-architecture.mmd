@@ -1,0 +1,71 @@
+flowchart TB
+    User[Researcher]
+
+    subgraph Desktop[PaperWeave Desktop · Local-first]
+        UI[React / TypeScript UI]
+        App[Application Services]
+        Jobs[Background Job Queue]
+        Core[Rust Local Core]
+        Reader[PDF.js Reader]
+        Parser[Sandboxed Document Parser]
+        DB[(SQLite + FTS)]
+        Vec[(Pluggable Vector Index)]
+        Vault[(Local PDF / Cache References)]
+        Keychain[(OS Keychain)]
+        Git[Local Git Adapter]
+        Zotero[Zotero Local API Adapter]
+        Models[LLM Provider Adapter]
+
+        UI --> App
+        UI --> Reader
+        App --> Jobs
+        Jobs --> Core
+        Core --> DB
+        Core --> Vec
+        Core --> Vault
+        Core --> Keychain
+        Core --> Parser
+        Core --> Git
+        Core --> Zotero
+        Core --> Models
+        Reader --> Vault
+        Parser --> Vault
+        Parser --> DB
+    end
+
+    subgraph Cloud[Optional PaperWeave Cloud]
+        Broker[Metadata Broker]
+        Reco[Candidate / Citation Graph Service]
+        Sync[Optional Account & Preference Sync]
+        Telemetry[Opt-in Telemetry]
+    end
+
+    subgraph Scholarly[Scholarly Data Providers]
+        OpenAlex[OpenAlex]
+        Crossref[Crossref]
+        S2[Semantic Scholar]
+        Unpaywall[Unpaywall]
+        Arxiv[arXiv / Domain Repositories]
+        Scite[Optional citation-context provider]
+    end
+
+    subgraph External[User-owned Systems]
+        ZoteroApp[Zotero Desktop]
+        GitRepo[(Local Research Notes Repo)]
+        GitHub[GitHub / Other Remote]
+        LLM[User-selected LLM / Local Model]
+    end
+
+    User --> UI
+    App -. metadata request .-> Broker
+    Broker --> Scholarly
+    Broker --> Reco
+    App -. optional preferences .-> Sync
+    App -. consented events .-> Telemetry
+    Zotero --> ZoteroApp
+    Git --> GitRepo
+    GitRepo -. optional push .-> GitHub
+    Models --> LLM
+
+    CloudNote[PDFs, full notes and API keys are not uploaded to PaperWeave Cloud by default]
+    CloudNote -. policy .-> Cloud
