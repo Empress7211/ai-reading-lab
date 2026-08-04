@@ -17,6 +17,19 @@
 - 生成模板、索引、校验器和机械性元数据。
 - 在用户明确要求时进行选择性复现。
 
+## Zotero 自动收集
+
+用户已授权本项目对实际推荐或明确选择的论文执行项目范围内的自动收集，无需逐篇再次确认：
+
+1. 先按 DOI、arXiv ID、OpenReview ID 和规范化标题搜索整个 Zotero 文库，复用已有条目，禁止盲目重复导入。
+2. 新论文先加入 `AI Reading Lab/00 Inbox`；已确定主题的论文可直接加入对应子集合。
+3. 优先从论文的官方页面、DOI、arXiv 或 OpenReview 使用 Zotero Connector / Add by Identifier 保存元数据，并自动保存可合法访问的 PDF。
+4. 若条目已存在但没有 PDF，执行 Zotero 的“查找全文 / Find Available PDF”。
+5. 保存后必须读取条目 children，确认存在 `application/pdf` 附件；若因付费墙、验证码或来源失效无法获取，只保留元数据并明确报告，不绕过访问控制。
+6. 仅对最终呈现给用户的推荐或用户明确要求收藏的论文执行收集；搜索时被淘汰的候选不写入 Zotero。
+7. PDF、附件路径和 Zotero 数据库始终不得进入 Git。
+8. Better BibTeX 必须忽略 `file` 字段；若自动导出出现本机绝对路径，先修正导出设置，不得手工修改生成文件掩盖问题。
+
 ## 禁止事项
 
 - 不得擅自宣称用户已经阅读或理解某篇论文。
@@ -35,6 +48,8 @@
 - 修改治理规则时新增 `decisions/YYYY-MM-DD-<slug>.md`，记录背景、决定、替代方案和后果。
 - 提交前运行 `python3 scripts/lab.py build`、`python3 scripts/lab.py check` 和 `python3 -m unittest discover -s tests -v`。
 - 提交前缀只使用 `read:`、`synth:`、`meta:`、`repro:`。
+- 项目范围内产生受跟踪文件变更时，完成校验后默认创建小粒度提交并推送 `main`；若用户要求仅审阅、存在无关脏改动或校验失败，则不得自动推送。
+- 仓库为 public；写入笔记前检查私人信息、公司内部内容、密钥、未授权全文和本机绝对路径。
 
 ## 输出标准
 

@@ -83,6 +83,16 @@ class LabTestCase(unittest.TestCase):
         errors = lab.check_forbidden_files(root, 5_242_880)
         self.assertTrue(any("possible OpenAI API key" in error for error in errors))
 
+    def test_local_absolute_path_fails(self) -> None:
+        temporary, root = self.make_repo()
+        self.addCleanup(temporary.cleanup)
+        (root / "references/library.bib").write_text(
+            "@article{paper, file={/" + "Users/example/Zotero/storage/ABCD1234/paper.pdf}}\n",
+            encoding="utf-8",
+        )
+        errors = lab.check_forbidden_files(root, 5_242_880)
+        self.assertTrue(any("possible local absolute path" in error for error in errors))
+
     def test_broken_relative_link_fails(self) -> None:
         temporary, root = self.make_repo()
         self.addCleanup(temporary.cleanup)

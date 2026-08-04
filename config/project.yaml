@@ -1,5 +1,6 @@
 project: "AI Reading Lab"
 repository: "Empress7211/ai-reading-lab"
+repository_visibility: "public"
 timezone: "Asia/Singapore"
 active_cycle: "2026-C01"
 active_cycle_dir: "cycles/2026-C01-agent-post-training"
@@ -13,3 +14,5 @@ review_intervals_days: [1, 7, 30, 90]
 deep_reading_wip_limit: 1
 deep_queue_limit: 3
 max_file_bytes: 5242880
+zotero_inbox: "AI Reading Lab/00 Inbox"
+zotero_pdf_policy: "auto-if-available"

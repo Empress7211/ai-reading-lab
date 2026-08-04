@@ -8,7 +8,7 @@
 
 ## 十分钟上手
 
-1. 在 Zotero 的 `AI Reading Lab/00 Inbox` 收集候选论文，不把 PDF 放进仓库。
+1. 让 Codex 推荐或收集论文；实际推荐的论文会自动进入 Zotero `AI Reading Lab/00 Inbox`，并自动尝试保存 PDF。
 2. 周结时决定下周论文；新热点先留在 `90 Frontier-Watch`，不在周中改主线。
 3. 将进入阅读队列的论文固定 Better BibTeX citation key，并确认它已出现在 `references/library.bib`。
 4. 创建笔记：`python3 scripts/lab.py new-paper <citekey>`，补齐 Zotero item key 后开始阅读。
@@ -26,6 +26,23 @@ python3 -m unittest discover -s tests -v
 ```
 
 `new-paper` 会生成带 `TODO` Zotero key 的草稿；在补成真实的 8 位 Zotero item key、且对应 citekey 已进入 BibTeX 前，`check` 会有意失败。
+
+## 智能收集默认行为
+
+本项目把 Codex 作为阅读流程的协调器。每当用户要求推荐、收藏或纳入阅读队列时，Codex 默认完成：
+
+```text
+检索与筛选 → Zotero 全库去重 → 收入 AI Reading Lab
+            → 自动查找合法可用 PDF → 验证附件
+            → Better BibTeX 自动导出 → 创建/更新笔记
+            → build + check + test → 小粒度提交并推送
+```
+
+- “找到”指最终实际推荐给用户或用户明确选择的论文，不包含检索过程中被淘汰的候选。
+- 新候选默认进入 `00 Inbox`；热点观察进入 `90 Frontier-Watch`；确定阅读后才进入主题集合和 Git 笔记。
+- 优先使用 DOI、arXiv、OpenReview 或出版方官方页面保存；不从未知镜像下载，不绕过付费墙或验证码。
+- PDF 获取失败不会阻塞元数据入库，但必须明确报告失败原因；Git 中始终看不到 PDF，因为文件只由 Zotero 管理。
+- Better BibTeX 的“不导出的字段”设置包含 `file`，防止公开 BibTeX 泄露本机 Zotero 附件路径。
 
 ## 信息边界
 
@@ -47,6 +64,7 @@ Zotero item key（例如 `PXW99EKT`）用于定位 Zotero 条目；BibTeX citati
 
 ## 仓库规则
 
+- 本仓库为 public；笔记不得包含私人信息、公司内部资料、密钥、未授权全文或本机绝对路径。
 - 任一时刻最多一篇论文处于 `reading`，精读队列最多三篇。
 - 摘要必须自行复述，禁止复制论文 Abstract 充当笔记。
 - 任何付费 API、主题切换或治理规则变更，都必须得到明确授权并记录决策。

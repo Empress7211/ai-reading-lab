@@ -38,6 +38,11 @@ SECRET_PATTERNS = {
     "GitHub token": re.compile(r"\b(?:github_pat_|ghp_)[A-Za-z0-9_]{20,}\b"),
     "private key": re.compile(r"-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----"),
 }
+LOCAL_PATH_PATTERNS = {
+    "macOS user path": re.compile("/" + r"Users/[^/\s]+/"),
+    "Linux home path": re.compile("/" + r"home/[^/\s]+/"),
+    "Windows user path": re.compile(r"[A-Za-z]:\\\\Users\\\\[^\\\\\s]+\\\\"),
+}
 FORBIDDEN_SUFFIXES = {".pdf", ".sqlite", ".sqlite-journal", ".xpi"}
 FORBIDDEN_DIR_NAMES = {"storage", "attachments"}
 
@@ -374,6 +379,9 @@ def check_forbidden_files(root: Path, max_bytes: int) -> list[str]:
         for label, pattern in SECRET_PATTERNS.items():
             if pattern.search(content):
                 errors.append(f"{rel}: possible {label} detected")
+        for label, pattern in LOCAL_PATH_PATTERNS.items():
+            if pattern.search(content):
+                errors.append(f"{rel}: possible local absolute path detected ({label})")
     return errors
 
 
