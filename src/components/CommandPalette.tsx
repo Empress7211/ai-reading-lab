@@ -1,14 +1,7 @@
-import {
-  BookOpen,
-  Compass,
-  Database,
-  Network,
-  Search,
-  Settings,
-} from 'lucide-react';
+import { BookOpen, Database, Search, Settings } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { AppView } from '../data/fixtures';
+import type { AppView } from './AppShell';
 
 interface CommandDefinition {
   id: AppView;
@@ -18,11 +11,9 @@ interface CommandDefinition {
 }
 
 const commands: CommandDefinition[] = [
-  { id: 'discover', label: '创建平衡阅读包', description: '从研究问题开始', icon: Compass },
-  { id: 'library', label: '打开文献库', description: '查看 fixture 与本地状态', icon: Database },
-  { id: 'reading', label: '继续阅读', description: '恢复最近研究会话', icon: BookOpen },
-  { id: 'knowledge', label: '查看命题矩阵', description: '比较支持、反对与限定', icon: Network },
-  { id: 'settings', label: '模型与隐私设置', description: '外部能力当前未配置', icon: Settings },
+  { id: 'library', label: '打开文献库', description: '导入或打开本地 PDF', icon: Database },
+  { id: 'reader', label: '打开阅读器', description: '继续当前本地论文', icon: BookOpen },
+  { id: 'settings', label: '查看本地设置', description: '确认运行状态与能力边界', icon: Settings },
 ];
 
 interface CommandPaletteProps {

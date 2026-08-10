@@ -1,76 +1,58 @@
-import { useState } from 'react';
-import { Button } from '../../components/Button';
+import { useState, type ReactNode } from 'react';
 import { DemoBanner } from '../../components/DemoBanner';
 import { PageHeader } from '../../components/PageHeader';
 
-type SettingsTab = 'models' | 'workspace' | 'zotero' | 'git' | 'privacy' | 'parsing';
+type SettingsTab = 'workspace' | 'privacy' | 'pdf';
 
 interface SettingsPageProps {
-  onMessage: (title: string, detail: string) => void;
+  runtimeLabel: string;
 }
 
-function SwitchRow({ title, detail, initialValue = false }: { title: string; detail: string; initialValue?: boolean }) {
-  const [checked, setChecked] = useState(initialValue);
-  return <div className="setting-row"><span><strong>{title}</strong><small>{detail}</small></span><button type="button" role="switch" aria-checked={checked} aria-label={title} className={`switch ${checked ? 'is-on' : ''}`} onClick={() => setChecked((value) => !value)}><span /></button></div>;
-}
+const labels: Array<[SettingsTab, string]> = [
+  ['workspace', '本地工作区'],
+  ['privacy', '隐私边界'],
+  ['pdf', 'PDF 阅读器'],
+];
 
-export function SettingsPage({ onMessage }: SettingsPageProps) {
-  const [tab, setTab] = useState<SettingsTab>('models');
-  const labels: Array<[SettingsTab, string]> = [
-    ['models', '模型与路由'], ['workspace', '工作区'], ['zotero', 'Zotero'], ['git', 'Git / GitHub'], ['privacy', '隐私与云端'], ['parsing', 'PDF 与解析'],
-  ];
+export function SettingsPage({ runtimeLabel }: SettingsPageProps) {
+  const [tab, setTab] = useState<SettingsTab>('workspace');
 
   return (
     <div className="page">
       <DemoBanner />
-      <PageHeader title="设置" description="所有字段均为未保存的 UI fixture；不会保存密钥或连接外部系统。" />
+      <PageHeader title="设置" description="Phase 1 只展示真实运行状态；尚未实现的配置不会以可操作表单出现。" />
       <div className="settings-layout">
-        <nav className="settings-nav" aria-label="设置分类">{labels.map(([value, label]) => <button type="button" key={value} className={tab === value ? 'is-active' : ''} aria-current={tab === value ? 'page' : undefined} onClick={() => setTab(value)}>{label}</button>)}</nav>
-        {tab === 'models' ? (
-          <section className="settings-section">
-            <header><h2>模型 Provider</h2><p>BYOK 配置占位；正式版密钥必须进入系统 Keychain。</p></header>
-            <div className="settings-body">
-              <div className="field-grid">
-                <label>Profile 名称<input defaultValue="未配置的研究 Profile" /></label>
-                <label>Provider 类型<select defaultValue="none"><option value="none">未配置</option><option value="openai-compatible">OpenAI-compatible</option><option value="local">Local compatible server</option></select></label>
-                <label className="field-full">Base URL<input placeholder="尚未配置" /></label>
-                <label className="field-full">API Key<input type="password" placeholder="不会在验证版中保存" autoComplete="off" /><small>正式版保存后不可回读明文，只能替换或删除。</small></label>
-                <label>Claim 提取<select disabled><option>等待 Provider</option></select></label>
-                <label>跨论文综合<select disabled><option>等待 Provider</option></select></label>
-              </div>
-              <SwitchRow title="允许发送整篇全文" detail="默认关闭；建议仅发送当前选区、章节和必要 Verified context。" />
-              <SwitchRow title="自动清理原始模型响应" detail="正式版默认保留 7 天后删除。" initialValue />
-              <div className="settings-actions"><Button onClick={() => onMessage('模型未配置', '没有发送连接测试。')}>测试说明</Button><Button variant="primary" onClick={() => onMessage('设置未保存', '验证版不会写入 Keychain 或数据库。')}>预览保存</Button></div>
-            </div>
-          </section>
+        <nav className="settings-nav" aria-label="设置分类">
+          {labels.map(([value, label]) => <button type="button" key={value} className={tab === value ? 'is-active' : ''} aria-current={tab === value ? 'page' : undefined} onClick={() => setTab(value)}>{label}</button>)}
+        </nav>
+        {tab === 'workspace' ? (
+          <SettingsSection title="本地工作区" description="当前应用数据与 PDF 均保存在本机。">
+            <StatusRow label="运行时" value={runtimeLabel} />
+            <StatusRow label="论文来源" value="仅手动导入本地 PDF" />
+            <StatusRow label="AI Provider" value="未配置" />
+          </SettingsSection>
         ) : tab === 'privacy' ? (
-          <section className="settings-section"><header><h2>隐私与数据流</h2><p>按数据类别控制本地、模型 Provider 和可选云端。</p></header><div className="settings-body">
-            <SwitchRow title="PDF 与完整笔记只保留本地" detail="Local-first 默认值。" initialValue />
-            <SwitchRow title="匿名产品分析" detail="当前关闭；不得包含标题、正文、Anchor 或笔记。" />
-            <SwitchRow title="云端主题追踪" detail="仅允许主题定义与元数据 ID；当前未配置。" />
-            <SwitchRow title="自动清理模型响应" detail="配置模型后按保留策略执行。" initialValue />
-          </div></section>
+          <SettingsSection title="隐私边界" description="没有静默联网或外部同步。">
+            <StatusRow label="PDF 上传" value="关闭" />
+            <StatusRow label="网络请求" value="当前版本不发起" />
+            <StatusRow label="本地数据" value="不会自动传出设备" />
+          </SettingsSection>
         ) : (
-          <IntegrationSettings tab={tab} onMessage={onMessage} />
+          <SettingsSection title="PDF 阅读器" description="真实 PDF 由 PDF.js 渲染；Anchor 使用页码、归一化坐标与文本指纹定位。">
+            <StatusRow label="渲染器" value="PDF.js 5.6" />
+            <StatusRow label="Evidence Anchor" value="本机持久化" />
+            <StatusRow label="OCR / Docling" value="尚未实现" />
+          </SettingsSection>
         )}
       </div>
     </div>
   );
 }
 
-function IntegrationSettings({ tab, onMessage }: { tab: Exclude<SettingsTab, 'models' | 'privacy'>; onMessage: SettingsPageProps['onMessage'] }) {
-  const copy = {
-    workspace: ['工作区', 'SQLite、解析缓存、备份与导出', '未选择本地目录'],
-    zotero: ['Zotero', 'Local API、Library 与写入授权', '未配置 Local API'],
-    git: ['Git / GitHub', '本地仓库、分支与可选远端权限', '未选择仓库'],
-    parsing: ['PDF 与解析', 'PDF.js、Docling worker、OCR 与解析缓存', '未配置解析 Worker'],
-  } as const;
-  const [title, description, value] = copy[tab];
-  return <section className="settings-section"><header><h2>{title}</h2><p>{description}</p></header><div className="settings-body">
-    <label className="standalone-field">当前配置<input value={value} readOnly /></label>
-    <SwitchRow title="启动时检查连接" detail="失败不会阻止本地阅读。" />
-    <SwitchRow title="外部写入前显示预览" detail="首次和冲突场景不可关闭。" initialValue />
-    <div className="settings-actions"><Button onClick={() => onMessage(`${title} 未配置`, '没有执行连接检查。')}>检查说明</Button><Button variant="primary" onClick={() => onMessage('设置未保存', '当前只保留界面预览。')}>预览保存</Button></div>
-  </div></section>;
+function SettingsSection({ title, description, children }: { title: string; description: string; children: ReactNode }) {
+  return <section className="settings-section"><header><h2>{title}</h2><p>{description}</p></header><div className="settings-body">{children}</div></section>;
 }
 
+function StatusRow({ label, value }: { label: string; value: string }) {
+  return <div className="setting-row"><span><strong>{label}</strong><small>{value}</small></span></div>;
+}

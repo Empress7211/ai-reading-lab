@@ -2,17 +2,29 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-li
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { EvidenceAnchor, Paper } from '../../domain';
 import { reviewDraftProposal } from '../../domain';
-import { createClaimFixtures, themeFixtures } from '../../data/fixtures';
 import { createLocalReviewDrafts } from '../../services/localReviewDrafts';
 import { ReaderPage, type PersistedReviewEntry } from './ReaderPage';
 
-const fixtureTheme = themeFixtures[0]!;
-const fixturePaper = fixtureTheme.papers[0]!;
-const paper = {
+const paper: Paper = {
   id: 'paper-local',
   title: 'Local test PDF',
   currentVersionId: 'version-1',
-} as Paper;
+  authors: ['Local Author'],
+  year: 2026,
+  abstract: null,
+  identifiers: [],
+  versions: [{
+    id: 'version-1',
+    label: 'unknown',
+    sourceUrl: null,
+    license: null,
+    pdfSha256: `sha256:${'b'.repeat(64)}`,
+    isVersionOf: null,
+  }],
+  zoteroItemKey: null,
+  createdAt: '2026-08-05T00:00:00.000Z',
+  updatedAt: '2026-08-05T00:00:00.000Z',
+};
 const anchor: EvidenceAnchor = {
   id: 'anchor-1',
   paperVersionId: 'version-1',
@@ -38,22 +50,16 @@ function renderReader(
   entries: PersistedReviewEntry[],
   onReview = vi.fn().mockResolvedValue(undefined),
   openLedger = true,
-) {
+  ) {
   render(<ReaderPage
-    paper={fixturePaper}
-    theme={fixtureTheme}
-    claims={createClaimFixtures(fixturePaper)}
+    paper={paper}
     notes="User note"
     onBack={() => undefined}
-    onOpenSyncPreview={() => undefined}
-    onUpdateClaim={() => undefined}
     onNotesChange={() => undefined}
     onMessage={() => undefined}
-    localDocumentTitle="Local test PDF"
     localPdfFile={null}
     localPdfError="PDF fixture intentionally unavailable in unit test"
     localAnchors={[anchor]}
-    localAnchorCount={1}
     localPaperVersionId="version-1"
     persistedReviews={entries}
     nativeFileDialog={false}
@@ -68,7 +74,7 @@ function renderReader(
 }
 
 describe('Reader persisted review UI', () => {
-  it('opens in the local notes workspace and keeps secondary document actions in a menu', () => {
+  it('opens in the local notes workspace and exposes only the real PDF replacement action', () => {
     renderReader([], vi.fn().mockResolvedValue(undefined), false);
 
     expect(screen.getByRole('heading', { name: '我的笔记' })).toBeInTheDocument();
@@ -79,8 +85,8 @@ describe('Reader persisted review UI', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '更多文档操作' }));
     expect(screen.getByRole('menuitem', { name: '更换 PDF' })).toBeInTheDocument();
-    expect(screen.getByRole('menuitem', { name: '未关联 Zotero' })).toBeInTheDocument();
-    expect(screen.getByRole('menuitem', { name: '打开同步预览' })).toBeInTheDocument();
+    expect(screen.queryByText(/Zotero/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/同步预览/)).not.toBeInTheDocument();
   });
 
   it('routes Accepted, Edited, and Rejected buttons through the formal review callback', async () => {

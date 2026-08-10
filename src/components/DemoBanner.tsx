@@ -2,10 +2,9 @@ import { Info } from 'lucide-react';
 
 export function DemoBanner() {
   return (
-    <aside className="demo-banner" aria-label="演示模式说明">
+    <aside className="demo-banner" aria-label="Internal Alpha 能力说明">
       <Info size={17} aria-hidden="true" />
-      <p><strong>产品验证版 · fixture 数据。</strong> 不联网、不调用模型、不读取 Zotero、不写入 Git；所有外部能力均为未配置或只读预览。</p>
+      <p><strong>Internal Alpha · 本地运行。</strong> 只支持本地 PDF、Evidence Anchor、笔记与显式审阅 fixture；AI 尚未配置。</p>
     </aside>
   );
 }
-
