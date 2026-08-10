@@ -6,18 +6,21 @@ import {
 } from '../tauriCommands';
 
 describe('Tauri command allowlist', () => {
-  it('contains only local workspace operations and sync preview', () => {
+  it('contains only v0.1 local product operations and deferred OpenAI ports', () => {
     expect(Object.values(TAURI_COMMANDS)).toEqual([
       'workspace_initialize',
       'workspace_snapshot',
       'import_local_pdf',
       'load_pdf_bytes',
       'save_anchor',
-      'save_draft',
+      'save_draft_bundle',
       'review_draft',
-      'save_user_note',
+      'save_judgment',
       'save_settings',
-      'preview_sync',
+      'open_ai_credential_status',
+      'save_open_ai_api_key',
+      'delete_open_ai_api_key',
+      'generate_drafts',
     ]);
     expect(isAllowedTauriCommand('execute_sync')).toBe(false);
     expect(isAllowedTauriCommand('zotero_write')).toBe(false);
@@ -39,8 +42,8 @@ describe('Tauri command allowlist', () => {
     const safeInvoke = createAllowlistedInvoke(invoke);
 
     await expect(
-      safeInvoke(TAURI_COMMANDS.previewSync, { target: 'git' }),
+      safeInvoke(TAURI_COMMANDS.generateDrafts, { input: { paperId: 'paper-1', anchorIds: ['anchor-1'] } }),
     ).resolves.toEqual({ ok: true });
-    expect(invoke).toHaveBeenCalledWith('preview_sync', { target: 'git' });
+    expect(invoke).toHaveBeenCalledWith('generate_drafts', { input: { paperId: 'paper-1', anchorIds: ['anchor-1'] } });
   });
 });

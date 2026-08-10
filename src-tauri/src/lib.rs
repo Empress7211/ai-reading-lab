@@ -25,11 +25,14 @@ pub fn run() {
             commands::import_local_pdf,
             commands::load_pdf_bytes,
             commands::save_anchor,
-            commands::save_draft,
+            commands::save_draft_bundle,
             commands::review_draft,
-            commands::save_user_note,
+            commands::save_judgment,
             commands::save_settings,
-            commands::preview_sync,
+            commands::open_ai_credential_status,
+            commands::save_open_ai_api_key,
+            commands::delete_open_ai_api_key,
+            commands::generate_drafts,
         ])
         .run(tauri::generate_context!())
         .expect("PaperWeave failed to start");

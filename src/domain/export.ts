@@ -40,7 +40,9 @@ function listLine(label: string, values: readonly string[]): string | null {
 
 function claimHeading(claim: Claim, exportData: PaperMarkdownExport): string {
   const normalizedClaim = inline(claim.claimText).toLocaleLowerCase();
-  const duplicatesSourceText = claim.evidence.some((item) => {
+  const duplicatesSourceText = claim.evidenceLinkIds.some((linkId) => {
+    const item = exportData.evidenceLinks.get(linkId);
+    if (!item) return false;
     const anchor = exportData.anchors.get(item.anchorId);
     return anchor !== undefined && inline(anchor.selectedText).toLocaleLowerCase() === normalizedClaim;
   });
@@ -50,15 +52,21 @@ function claimHeading(claim: Claim, exportData: PaperMarkdownExport): string {
 }
 
 function renderClaim(claim: Claim, exportData: PaperMarkdownExport): string[] {
-  assertValidClaim(claim, exportData.anchors);
+  assertValidClaim(claim, exportData.anchors, exportData.evidenceLinks);
 
-  const evidence = sorted(claim.evidence, (item) => `${item.anchorId}:${item.supportType}`).map(
-    (item) => {
+  const evidence = sorted(
+    claim.evidenceLinkIds.map((linkId) => {
+      const link = exportData.evidenceLinks.get(linkId);
+      if (!link) throw new MarkdownExportError(`Missing EvidenceLink ${linkId} for Claim ${claim.id}.`);
+      return link;
+    }),
+    (item) => `${item.ordinal}:${item.anchorId}`,
+  ).map((item) => {
       const anchor = exportData.anchors.get(item.anchorId);
       if (!anchor) {
         throw new MarkdownExportError(`Missing Anchor ${item.anchorId} for Claim ${claim.id}.`);
       }
-      return `${anchorLabel(anchor)} (${item.supportType})`;
+      return `${anchorLabel(anchor)} (${item.relation}; ${item.supportType})`;
     },
   );
 

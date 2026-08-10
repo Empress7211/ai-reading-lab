@@ -7,44 +7,63 @@ import type {
   DraftProposal,
   DraftReviewDecision,
   EvidenceAnchor,
-  NoteBlock,
+  EvidenceLink,
+  EvidenceRelation,
+  JudgmentNote,
   Paper,
   ReviewAction,
   VerifiedClaim,
 } from './domain';
-import { reviewDraftProposal } from './domain';
+import {
+  createEmptyJudgmentSections,
+  renderPaperMarkdown,
+  reviewDraftProposal,
+} from './domain';
 import { LibraryPage } from './features/library/LibraryPage';
 import type { LocalPdfAnchor } from './features/LocalPdfViewer';
 import { ReaderEmptyState, ReaderPage, type PersistedReviewEntry } from './features/reader/ReaderPage';
 import { SettingsPage } from './features/settings/SettingsPage';
-import {
-  createLocalReviewDrafts,
-  createWorkspaceRepository,
-  type WorkspaceSnapshot,
-} from './services';
+import { createWorkspaceRepository, type WorkspaceSnapshot } from './services';
 
 interface LocalDocument {
   paper: Paper;
   file: File | null;
   pdfError: string | null;
   anchors: EvidenceAnchor[];
+  evidenceLinks: EvidenceLink[];
   drafts: DraftProposal[];
   reviewActions: ReviewAction[];
   verifiedClaims: VerifiedClaim[];
-  note: string;
+  judgment: JudgmentNote;
 }
 
-const defaultNotes = `我的判断：
+function emptyJudgment(paper: Paper): JudgmentNote {
+  return {
+    id: `judgment-${paper.id}`,
+    paperId: paper.id,
+    paperVersionId: paper.currentVersionId ?? '',
+    sections: createEmptyJudgmentSections(),
+    status: 'draft',
+    createdBy: 'user',
+    updatedAt: new Date().toISOString(),
+    completedAt: null,
+  };
+}
 
-为什么：
-
-支持证据：
-
-反方证据：
-
-仍不确定：
-
-下一步验证：`;
+function paperDocument(snapshot: WorkspaceSnapshot, paper: Paper): Omit<LocalDocument, 'file' | 'pdfError'> {
+  const anchors = snapshot.anchors.filter((anchor) => anchor.paperVersionId === paper.currentVersionId);
+  const drafts = snapshot.drafts.filter((draft) => draft.paperId === paper.id);
+  const draftIds = new Set(drafts.map((draft) => draft.id));
+  return {
+    paper,
+    anchors,
+    evidenceLinks: snapshot.evidenceLinks.filter((link) => draftIds.has(link.claimId)),
+    drafts,
+    reviewActions: snapshot.reviewActions.filter((action) => draftIds.has(action.claimId)),
+    verifiedClaims: snapshot.verifiedClaims.filter((claim) => claim.paperId === paper.id),
+    judgment: snapshot.judgments.find((item) => item.paperId === paper.id) ?? emptyJudgment(paper),
+  };
+}
 
 export default function App() {
   const repository = useMemo(() => createWorkspaceRepository({ global: globalThis }), []);
@@ -91,20 +110,24 @@ export default function App() {
     return () => window.removeEventListener('keydown', handleShortcut);
   }, []);
 
+  const refreshOpenDocument = useCallback(async (paperId: string) => {
+    const snapshot = await repository.snapshot();
+    const paper = snapshot.papers.find((candidate) => candidate.id === paperId);
+    if (!paper) throw new Error(`本地工作区中不存在论文 ${paperId}。`);
+    setWorkspaceSnapshot(snapshot);
+    setLocalDocument((current) => ({
+      ...paperDocument(snapshot, paper),
+      file: current?.paper.id === paperId ? current.file : null,
+      pdfError: current?.paper.id === paperId ? current.pdfError : null,
+    }));
+  }, [repository]);
+
   const openStoredPaper = useCallback(async (paperId: string) => {
     setOpeningPaperId(paperId);
     try {
       const snapshot = await repository.snapshot();
       const paper = snapshot.papers.find((candidate) => candidate.id === paperId);
       if (!paper) throw new Error(`本地工作区中不存在论文 ${paperId}。`);
-
-      const anchors = snapshot.anchors.filter((anchor) => anchor.paperVersionId === paper.currentVersionId);
-      const drafts = snapshot.drafts.filter((draft) => draft.paperId === paper.id);
-      const draftIds = new Set(drafts.map((draft) => draft.id));
-      const reviewActions = snapshot.reviewActions.filter((action) => draftIds.has(action.claimId));
-      const verifiedClaims = snapshot.verifiedClaims.filter((claim) => claim.paperId === paper.id);
-      const note = snapshot.userNotes.filter((item) => item.paperId === paper.id).at(-1)?.content ?? defaultNotes;
-
       let file: File | null = null;
       let pdfError: string | null = null;
       try {
@@ -114,9 +137,8 @@ export default function App() {
       } catch (reason) {
         pdfError = reason instanceof Error ? reason.message : '无法从本地仓库读取 PDF。';
       }
-
       setWorkspaceSnapshot(snapshot);
-      setLocalDocument({ paper, file, pdfError, anchors, drafts, reviewActions, verifiedClaims, note });
+      setLocalDocument({ ...paperDocument(snapshot, paper), file, pdfError });
       setView('reader');
     } catch (reason) {
       pushToast('论文打开失败', reason instanceof Error ? reason.message : '无法读取本地论文。');
@@ -149,22 +171,12 @@ export default function App() {
       const snapshot = await repository.snapshot();
       setWorkspaceSnapshot(snapshot);
       setLocalDocument({
-        paper: imported.paper,
+        ...paperDocument(snapshot, imported.paper),
         file: displayFile,
         pdfError: null,
-        anchors: [],
-        drafts: [],
-        reviewActions: [],
-        verifiedClaims: [],
-        note: defaultNotes,
       });
       setView('reader');
-      pushToast(
-        '本地 PDF 已导入',
-        repository.runtime === 'tauri'
-          ? '文件副本已进入本机内容寻址 vault；没有上传。'
-          : '文件保存在浏览器本地存储；没有上传。',
-      );
+      pushToast('本地 PDF 已导入', '文件与研究数据只保存在当前设备；没有上传。');
     } catch (reason) {
       pushToast('PDF 导入失败', reason instanceof Error ? reason.message : '无法读取所选文件。');
     }
@@ -190,46 +202,69 @@ export default function App() {
       relocationStatus: 'exact',
       createdBy: 'user_selection',
     };
-    void repository.saveAnchor(anchor).then((saved) => {
-      setLocalDocument((document) => document?.paper.id === current.paper.id
-        ? { ...document, anchors: [...document.anchors.filter((item) => item.id !== saved.id), saved] }
-        : document);
-      setWorkspaceSnapshot((snapshot) => snapshot
-        ? { ...snapshot, anchors: [...snapshot.anchors.filter((item) => item.id !== saved.id), saved] }
-        : snapshot);
+    void repository.saveAnchor(anchor).then(async (saved) => {
+      await refreshOpenDocument(current.paper.id);
       pushToast('Evidence Anchor 已保存', `第 ${saved.pageIndex + 1} 页 · ${saved.selectedText.length} 个字符 · 本机持久化`);
-      if (current.drafts.length === 0) {
-        void persistReviewDrafts(current, saved).catch((reason) => {
-          pushToast('本地审阅 Draft 未创建', reason instanceof Error ? reason.message : 'Anchor 已保留，可稍后重新创建 Draft。');
-        });
-      }
     }).catch((reason) => {
       pushToast('Anchor 保存失败', reason instanceof Error ? reason.message : '本地仓库拒绝了此 Anchor。');
     });
   };
 
-  const persistReviewDrafts = async (document: LocalDocument, anchor: EvidenceAnchor) => {
-    const candidates = createLocalReviewDrafts(document.paper, anchor, new Date().toISOString());
-    const existingIds = new Set(document.drafts.map((draft) => draft.id));
-    const savedDrafts: DraftProposal[] = [];
-    for (const draft of candidates) {
-      if (existingIds.has(draft.id)) continue;
-      savedDrafts.push(await repository.saveDraft(draft));
-    }
-    if (savedDrafts.length === 0) return;
-    setLocalDocument((current) => current?.paper.id === document.paper.id
-      ? { ...current, drafts: [...current.drafts, ...savedDrafts] }
-      : current);
-    setWorkspaceSnapshot((snapshot) => snapshot ? { ...snapshot, drafts: [...snapshot.drafts, ...savedDrafts] } : snapshot);
-    pushToast('本地审阅 fixture 已保存', `${savedDrafts.length} 条固定 Draft；没有调用 AI。`);
-  };
-
-  const createReviewDraftsForAnchor = async (anchorId: string) => {
+  const createManualDraft = async (anchorId: string, claimText: string, relation: EvidenceRelation) => {
     const current = localDocument;
-    if (!current) throw new Error('没有可用的本地论文。');
+    if (!current?.paper.currentVersionId) throw new Error('没有可用的本地论文版本。');
     const anchor = current.anchors.find((candidate) => candidate.id === anchorId);
     if (!anchor) throw new Error(`Evidence Anchor ${anchorId} 不存在。`);
-    await persistReviewDrafts(current, anchor);
+    const normalizedText = claimText.trim();
+    if (normalizedText.length < 5) throw new Error('Draft Claim 至少需要 5 个字符。');
+    const now = new Date().toISOString();
+    const draftId = crypto.randomUUID();
+    const linkId = crypto.randomUUID();
+    const evidenceLink: EvidenceLink = {
+      id: linkId,
+      claimId: draftId,
+      anchorId,
+      relation,
+      supportType: 'direct_statement',
+      quotedFragment: anchor.selectedText,
+      note: null,
+      ordinal: 0,
+    };
+    const draft: DraftProposal = {
+      id: draftId,
+      paperId: current.paper.id,
+      paperVersionId: current.paper.currentVersionId,
+      claimText: normalizedText,
+      claimType: 'interpretive',
+      epistemicSource: 'author_claim',
+      evidenceLinkIds: [linkId],
+      assumptions: [],
+      scopeConditions: [],
+      limitations: [],
+      confidence: 1,
+      confidenceBasis: ['用户根据已保存的 PDF Evidence Anchor 手工创建'],
+      reviewStatus: 'draft',
+      createdBy: 'user',
+      needsHumanAttention: false,
+      modelRunId: null,
+      userComment: null,
+      version: 1,
+      createdAt: now,
+      updatedAt: now,
+      reviewedBy: null,
+      reviewedAt: null,
+      originalAiDraft: null,
+    };
+    await repository.saveDraftBundle({ draft, evidenceLinks: [evidenceLink] });
+    await refreshOpenDocument(current.paper.id);
+    pushToast('人工 Draft 已保存', '它仍须经过接受、编辑或驳回，才能成为 Verified Claim。');
+  };
+
+  const requestAiDrafts = async (anchorId: string) => {
+    const current = localDocument;
+    if (!current) throw new Error('没有可用的本地论文。');
+    await repository.generateDrafts({ paperId: current.paper.id, anchorIds: [anchorId] });
+    await refreshOpenDocument(current.paper.id);
   };
 
   const reviewLocalDraft = async (draftId: string, decision: DraftReviewDecision) => {
@@ -245,80 +280,65 @@ export default function App() {
       actorId: 'local-user',
       occurredAt: new Date().toISOString(),
       anchors: new Map(current.anchors.map((anchor) => [anchor.id, anchor])),
+      evidenceLinks: new Map(current.evidenceLinks.map((link) => [link.id, link])),
     });
     await repository.reviewDraft({
       action: result.reviewAction,
       ...(result.verifiedClaim ? { verifiedClaim: result.verifiedClaim } : {}),
     });
-    setLocalDocument((document) => document?.paper.id === current.paper.id
-      ? {
-        ...document,
-        reviewActions: [...document.reviewActions, result.reviewAction],
-        verifiedClaims: result.verifiedClaim
-          ? [...document.verifiedClaims.filter((claim) => claim.id !== result.verifiedClaim?.id), result.verifiedClaim]
-          : document.verifiedClaims,
-      }
-      : document);
-    setWorkspaceSnapshot(await repository.snapshot());
-    if (result.state === 'rejected') {
-      pushToast('Draft 已驳回', 'ReviewAction 已保存；没有产生 VerifiedClaim。');
-    } else if (result.verifiedClaim.reviewStatus === 'edited') {
-      pushToast('编辑并验证完成', '原始 Draft 未改写；ReviewAction 与 Verified · edited 已分别保存。');
-    } else {
-      pushToast('Draft 已接受', 'ReviewAction 与 Verified · accepted 已分别保存。');
-    }
+    await refreshOpenDocument(current.paper.id);
+    pushToast(
+      result.state === 'rejected' ? 'Draft 已驳回' : 'Claim 已验证',
+      result.state === 'rejected'
+        ? 'ReviewAction 已保存；没有产生 Verified Claim。'
+        : 'ReviewAction 与 Verified Claim 已分层保存。',
+    );
   };
 
-  useEffect(() => {
-    if (!localDocument) return;
-    const content = localDocument.note;
-    const timer = window.setTimeout(() => {
-      const reviewedAt = new Date().toISOString();
-      const note: NoteBlock = {
-        id: `user-note-${localDocument.paper.id}`,
-        paperId: localDocument.paper.id,
-        paperVersionId: localDocument.paper.currentVersionId ?? '',
-        noteType: 'summary',
-        title: '我的判断',
-        content,
-        evidence: localDocument.anchors.map((anchor) => ({
-          anchorId: anchor.id,
-          supportType: 'context',
-          quotedFragment: anchor.selectedText,
-          notes: null,
-        })),
-        reviewStatus: 'accepted',
-        createdBy: 'user',
-        originalAiContent: null,
-        reviewedBy: 'local-user',
-        reviewedAt,
-      };
-      void repository.saveUserNote(note).catch((reason) => {
-        pushToast('笔记尚未持久化', reason instanceof Error ? reason.message : '编辑仍保留在当前会话。');
-      });
-    }, 600);
-    return () => window.clearTimeout(timer);
-  }, [localDocument?.anchors, localDocument?.note, localDocument?.paper.currentVersionId, localDocument?.paper.id, pushToast, repository]);
+  const saveJudgment = async (judgment: JudgmentNote) => {
+    const current = localDocument;
+    if (!current) throw new Error('没有可用的本地论文。');
+    await repository.saveJudgment(judgment);
+    await refreshOpenDocument(current.paper.id);
+    pushToast(judgment.status === 'complete' ? '“我的判断”已完成' : '判断草稿已保存', '结构化内容与 Verified Claim 引用已本机持久化。');
+  };
 
-  const navigate = (nextView: AppView) => setView(nextView);
-  const runtimeLabel = repository.runtime === 'tauri'
-    ? 'Tauri + SQLite · 本机'
-    : repository.runtime === 'browser-indexeddb'
-      ? 'Web + IndexedDB · 本地'
-      : 'Web + localStorage · 降级';
+  const exportMarkdown = () => {
+    const current = localDocument;
+    if (!current) return;
+    const markdown = renderPaperMarkdown({
+      paperId: current.paper.id,
+      title: current.paper.title,
+      authors: current.paper.authors,
+      year: current.paper.year,
+      identifiers: current.paper.identifiers,
+      claims: current.verifiedClaims,
+      anchors: new Map(current.anchors.map((anchor) => [anchor.id, anchor])),
+      evidenceLinks: new Map(current.evidenceLinks.map((link) => [link.id, link])),
+    });
+    const blob = new Blob([markdown], { type: 'text/markdown;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const download = document.createElement('a');
+    download.href = url;
+    download.download = `${current.paper.title.replace(/[^\p{L}\p{N}]+/gu, '-').replace(/^-|-$/g, '') || 'paperweave'}.md`;
+    download.click();
+    URL.revokeObjectURL(url);
+    pushToast('Markdown 已导出', '只包含 Verified Claims 与可回溯页码，不包含 PDF 原文或文件路径。');
+  };
+
+  const runtimeLabel = repository.runtime === 'tauri' ? 'Tauri + SQLite · 本机' : 'Web + IndexedDB · 本地';
   const persistenceLabel = workspaceStatus === 'initializing'
     ? '正在初始化本地仓库'
     : workspaceStatus === 'error'
       ? '本地仓库不可用'
       : repository.runtime === 'tauri'
         ? 'SQLite · 本机持久化'
-        : repository.runtime === 'browser-indexeddb'
-          ? 'IndexedDB · 浏览器本地'
-          : 'localStorage · 浏览器降级';
+        : 'IndexedDB · 浏览器本地';
 
   const localReviews: PersistedReviewEntry[] = localDocument
     ? localDocument.drafts.map((draft) => ({
       draft,
+      evidenceLinks: localDocument.evidenceLinks.filter((link) => link.claimId === draft.id),
       reviewAction: localDocument.reviewActions.find((action) => action.claimId === draft.id) ?? null,
       verifiedClaim: localDocument.verifiedClaims.find((claim) => claim.id === draft.id) ?? null,
     }))
@@ -350,9 +370,9 @@ export default function App() {
   } else {
     pageContent = <ReaderPage
       paper={localDocument.paper}
-      notes={localDocument.note}
+      judgment={localDocument.judgment}
+      verifiedClaims={localDocument.verifiedClaims}
       onBack={() => setView('library')}
-      onNotesChange={(value) => setLocalDocument((current) => current ? { ...current, note: value } : current)}
       onMessage={pushToast}
       localPdfFile={localDocument.file}
       localPdfError={localDocument.pdfError}
@@ -363,21 +383,22 @@ export default function App() {
       persistenceLabel={persistenceLabel}
       onImportPdf={(file) => void importLocalPdf(file)}
       onAnchorCreate={saveLocalAnchor}
-      onCreateReviewDrafts={createReviewDraftsForAnchor}
+      onCreateManualDraft={createManualDraft}
+      onRequestAiDraft={requestAiDrafts}
       onReviewDraft={reviewLocalDraft}
+      onSaveJudgment={saveJudgment}
+      onExportMarkdown={exportMarkdown}
     />;
   }
 
-  return (
-    <>
-      <AppShell
-        view={view}
-        onNavigate={navigate}
-        onOpenPalette={() => { setPaletteQuery(''); setPaletteOpen(true); }}
-        runtimeLabel={runtimeLabel}
-      >{pageContent}</AppShell>
-      <CommandPalette open={paletteOpen} initialQuery={paletteQuery} onClose={() => setPaletteOpen(false)} onNavigate={navigate} />
-      <ToastRegion messages={toasts} />
-    </>
-  );
+  return <>
+    <AppShell
+      view={view}
+      onNavigate={setView}
+      onOpenPalette={() => { setPaletteQuery(''); setPaletteOpen(true); }}
+      runtimeLabel={runtimeLabel}
+    >{pageContent}</AppShell>
+    <CommandPalette open={paletteOpen} initialQuery={paletteQuery} onClose={() => setPaletteOpen(false)} onNavigate={setView} />
+    <ToastRegion messages={toasts} />
+  </>;
 }

@@ -20,7 +20,7 @@ export function SettingsPage({ runtimeLabel }: SettingsPageProps) {
   return (
     <div className="page">
       <DemoBanner />
-      <PageHeader title="设置" description="Phase 1 只展示真实运行状态；尚未实现的配置不会以可操作表单出现。" />
+      <PageHeader title="设置" description="查看本地运行边界与当前可用能力。未接入的服务会明确标记，不会静默降级。" />
       <div className="settings-layout">
         <nav className="settings-nav" aria-label="设置分类">
           {labels.map(([value, label]) => <button type="button" key={value} className={tab === value ? 'is-active' : ''} aria-current={tab === value ? 'page' : undefined} onClick={() => setTab(value)}>{label}</button>)}
@@ -29,12 +29,12 @@ export function SettingsPage({ runtimeLabel }: SettingsPageProps) {
           <SettingsSection title="本地工作区" description="当前应用数据与 PDF 均保存在本机。">
             <StatusRow label="运行时" value={runtimeLabel} />
             <StatusRow label="论文来源" value="仅手动导入本地 PDF" />
-            <StatusRow label="AI Provider" value="未配置" />
+            <StatusRow label="OpenAI Draft" value="接口已保留 · Keychain/API 适配待接入" />
           </SettingsSection>
         ) : tab === 'privacy' ? (
           <SettingsSection title="隐私边界" description="没有静默联网或外部同步。">
             <StatusRow label="PDF 上传" value="关闭" />
-            <StatusRow label="网络请求" value="当前版本不发起" />
+            <StatusRow label="网络请求" value="当前版本不发起；无模拟 AI" />
             <StatusRow label="本地数据" value="不会自动传出设备" />
           </SettingsSection>
         ) : (

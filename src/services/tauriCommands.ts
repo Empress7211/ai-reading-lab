@@ -4,11 +4,14 @@ export const TAURI_COMMANDS = {
   importLocalPdf: 'import_local_pdf',
   loadPdfBytes: 'load_pdf_bytes',
   saveAnchor: 'save_anchor',
-  saveDraft: 'save_draft',
+  saveDraftBundle: 'save_draft_bundle',
   reviewDraft: 'review_draft',
-  saveUserNote: 'save_user_note',
+  saveJudgment: 'save_judgment',
   saveSettings: 'save_settings',
-  previewSync: 'preview_sync',
+  openAiCredentialStatus: 'open_ai_credential_status',
+  saveOpenAiApiKey: 'save_open_ai_api_key',
+  deleteOpenAiApiKey: 'delete_open_ai_api_key',
+  generateDrafts: 'generate_drafts',
 } as const;
 
 export type TauriCommand = (typeof TAURI_COMMANDS)[keyof typeof TAURI_COMMANDS];

@@ -1,14 +1,15 @@
 import type {
   DraftProposal,
   EvidenceAnchor,
+  EvidenceLink,
+  JudgmentNote,
   NoteBlock,
   Paper,
   ReviewAction,
-  SyncPlan,
   VerifiedClaim,
 } from '../domain';
 
-export type RepositoryRuntime = 'tauri' | 'browser-indexeddb' | 'browser-localstorage';
+export type RepositoryRuntime = 'tauri' | 'browser-indexeddb';
 
 export interface WorkspaceSettings {
   locale: 'zh-CN' | 'en-US';
@@ -18,6 +19,7 @@ export interface WorkspaceSettings {
   telemetryEnabled: boolean;
   parserMode: 'local' | 'local-with-ocr' | 'remote-opt-in';
   activeModelProfileId: string | null;
+  openAiCredentialRef: string | null;
 }
 
 export const DEFAULT_WORKSPACE_SETTINGS: Readonly<WorkspaceSettings> = {
@@ -28,15 +30,18 @@ export const DEFAULT_WORKSPACE_SETTINGS: Readonly<WorkspaceSettings> = {
   telemetryEnabled: false,
   parserMode: 'local',
   activeModelProfileId: null,
+  openAiCredentialRef: null,
 };
 
 export interface WorkspaceSnapshot {
   papers: Paper[];
   anchors: EvidenceAnchor[];
+  evidenceLinks: EvidenceLink[];
   drafts: DraftProposal[];
   reviewActions: ReviewAction[];
   verifiedClaims: VerifiedClaim[];
   userNotes: NoteBlock[];
+  judgments: JudgmentNote[];
   settings: WorkspaceSettings;
 }
 
@@ -75,9 +80,24 @@ export interface ReviewDraftInput {
   verifiedClaim?: VerifiedClaim;
 }
 
-export interface SyncPreviewRequest {
-  paperIds: string[];
-  target: 'zotero' | 'git' | 'github';
+export interface DraftBundle {
+  draft: DraftProposal;
+  evidenceLinks: EvidenceLink[];
+}
+
+export interface GenerateDraftsInput {
+  paperId: string;
+  anchorIds: string[];
+}
+
+export interface GenerateDraftsResult {
+  modelRunId: string;
+  bundles: DraftBundle[];
+}
+
+export interface OpenAiCredentialStatus {
+  configured: boolean;
+  credentialRef: string | null;
 }
 
 export interface WorkspaceRepository {
@@ -88,10 +108,12 @@ export interface WorkspaceRepository {
   importPdf(input: ImportPdfInput): Promise<ImportedPdf>;
   loadPdfBytes(paperId: string): Promise<ArrayBuffer | null>;
   saveAnchor(anchor: EvidenceAnchor): Promise<EvidenceAnchor>;
-  saveDraft(draft: DraftProposal): Promise<DraftProposal>;
+  saveDraftBundle(bundle: DraftBundle): Promise<DraftBundle>;
   reviewDraft(input: ReviewDraftInput): Promise<ReviewAction>;
-  saveUserNote(note: NoteBlock): Promise<NoteBlock>;
+  saveJudgment(judgment: JudgmentNote): Promise<JudgmentNote>;
   saveSettings(settings: WorkspaceSettings): Promise<WorkspaceSettings>;
-  previewSync(request: SyncPreviewRequest): Promise<SyncPlan>;
+  openAiCredentialStatus(): Promise<OpenAiCredentialStatus>;
+  saveOpenAiApiKey(apiKey: string): Promise<OpenAiCredentialStatus>;
+  deleteOpenAiApiKey(): Promise<OpenAiCredentialStatus>;
+  generateDrafts(input: GenerateDraftsInput): Promise<GenerateDraftsResult>;
 }
-

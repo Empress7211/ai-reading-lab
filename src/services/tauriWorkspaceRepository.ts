@@ -1,22 +1,18 @@
 import { invoke as tauriInvoke } from '@tauri-apps/api/core';
-import type {
-  DraftProposal,
-  EvidenceAnchor,
-  NoteBlock,
-  Paper,
-  ReviewAction,
-  SyncPlan,
-} from '../domain';
+import type { EvidenceAnchor, JudgmentNote, Paper, ReviewAction } from '../domain';
 import {
   TAURI_COMMANDS,
   createAllowlistedInvoke,
   type Invoke,
 } from './tauriCommands';
 import type {
+  DraftBundle,
+  GenerateDraftsInput,
+  GenerateDraftsResult,
   ImportPdfInput,
   ImportedPdf,
+  OpenAiCredentialStatus,
   ReviewDraftInput,
-  SyncPreviewRequest,
   WorkspaceRepository,
   WorkspaceSeed,
   WorkspaceSettings,
@@ -86,24 +82,35 @@ export class TauriWorkspaceRepository implements WorkspaceRepository {
     return this.#invoke<EvidenceAnchor>(TAURI_COMMANDS.saveAnchor, { anchor });
   }
 
-  saveDraft(draft: DraftProposal): Promise<DraftProposal> {
-    return this.#invoke<DraftProposal>(TAURI_COMMANDS.saveDraft, { draft });
+  saveDraftBundle(bundle: DraftBundle): Promise<DraftBundle> {
+    return this.#invoke<DraftBundle>(TAURI_COMMANDS.saveDraftBundle, { bundle });
   }
 
   reviewDraft(input: ReviewDraftInput): Promise<ReviewAction> {
     return this.#invoke<ReviewAction>(TAURI_COMMANDS.reviewDraft, { input });
   }
 
-  saveUserNote(note: NoteBlock): Promise<NoteBlock> {
-    return this.#invoke<NoteBlock>(TAURI_COMMANDS.saveUserNote, { note });
+  saveJudgment(judgment: JudgmentNote): Promise<JudgmentNote> {
+    return this.#invoke<JudgmentNote>(TAURI_COMMANDS.saveJudgment, { judgment });
   }
 
   saveSettings(settings: WorkspaceSettings): Promise<WorkspaceSettings> {
     return this.#invoke<WorkspaceSettings>(TAURI_COMMANDS.saveSettings, { settings });
   }
 
-  previewSync(request: SyncPreviewRequest): Promise<SyncPlan> {
-    return this.#invoke<SyncPlan>(TAURI_COMMANDS.previewSync, { request });
+  openAiCredentialStatus(): Promise<OpenAiCredentialStatus> {
+    return this.#invoke<OpenAiCredentialStatus>(TAURI_COMMANDS.openAiCredentialStatus);
+  }
+
+  saveOpenAiApiKey(apiKey: string): Promise<OpenAiCredentialStatus> {
+    return this.#invoke<OpenAiCredentialStatus>(TAURI_COMMANDS.saveOpenAiApiKey, { apiKey });
+  }
+
+  deleteOpenAiApiKey(): Promise<OpenAiCredentialStatus> {
+    return this.#invoke<OpenAiCredentialStatus>(TAURI_COMMANDS.deleteOpenAiApiKey);
+  }
+
+  generateDrafts(input: GenerateDraftsInput): Promise<GenerateDraftsResult> {
+    return this.#invoke<GenerateDraftsResult>(TAURI_COMMANDS.generateDrafts, { input });
   }
 }
-

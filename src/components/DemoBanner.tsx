@@ -2,9 +2,9 @@ import { Info } from 'lucide-react';
 
 export function DemoBanner() {
   return (
-    <aside className="demo-banner" aria-label="Internal Alpha 能力说明">
+    <aside className="demo-banner" aria-label="本地能力说明">
       <Info size={17} aria-hidden="true" />
-      <p><strong>Internal Alpha · 本地运行。</strong> 只支持本地 PDF、Evidence Anchor、笔记与显式审阅 fixture；AI 尚未配置。</p>
+      <p><strong>PaperWeave v0.1 · 本地运行。</strong> PDF、证据、审阅与“我的判断”保存在当前设备；OpenAI 接口尚未接入。</p>
     </aside>
   );
 }

@@ -32,10 +32,6 @@ export function isVerified(statusOrClaim: ReviewStatus | Pick<Claim, "reviewStat
   return status === "accepted" || status === "edited";
 }
 
-function cloneEvidence(claim: Claim): AiDraftSnapshot["evidence"] {
-  return claim.evidence.map((evidence) => ({ ...evidence }));
-}
-
 function snapshotAiDraft(claim: Claim): AiDraftSnapshot | null {
   if (claim.createdBy !== "ai") {
     return null;
@@ -45,7 +41,7 @@ function snapshotAiDraft(claim: Claim): AiDraftSnapshot | null {
     claimText: claim.claimText,
     claimType: claim.claimType,
     epistemicSource: claim.epistemicSource,
-    evidence: cloneEvidence(claim),
+    evidenceLinkIds: [...claim.evidenceLinkIds],
     assumptions: [...claim.assumptions],
     scopeConditions: [...claim.scopeConditions],
     limitations: [...claim.limitations],
@@ -108,7 +104,7 @@ function reviewedClaim(
 
 export function acceptClaim(claim: Claim, context: ReviewContext): ReviewTransitionResult {
   requireStatus(claim, ["draft", "stale"], "accept");
-  assertValidClaim(claim, context.anchors);
+  assertValidClaim(claim, context.anchors, context.evidenceLinks);
 
   const accepted = reviewedClaim(claim, "accepted", context);
   return {
@@ -121,7 +117,6 @@ const EDITABLE_FIELDS: readonly ClaimEditableField[] = [
   "claimText",
   "claimType",
   "epistemicSource",
-  "evidence",
   "assumptions",
   "scopeConditions",
   "limitations",
@@ -146,9 +141,6 @@ function applyPatch(claim: Claim, patch: ClaimPatch): Claim {
     ...(hasOwn(patch, "claimType") ? { claimType: patch.claimType } : {}),
     ...(hasOwn(patch, "epistemicSource")
       ? { epistemicSource: patch.epistemicSource }
-      : {}),
-    ...(hasOwn(patch, "evidence")
-      ? { evidence: (patch.evidence as Claim["evidence"]).map((item) => ({ ...item })) }
       : {}),
     ...(hasOwn(patch, "assumptions")
       ? { assumptions: [...(patch.assumptions as readonly string[])] }
@@ -185,7 +177,7 @@ export function editAndAcceptClaim(
   const edited = reviewedClaim(editedContent, "edited", context, {
     originalAiDraft: claim.originalAiDraft ?? snapshotAiDraft(claim),
   });
-  assertValidClaim(edited, context.anchors);
+  assertValidClaim(edited, context.anchors, context.evidenceLinks);
 
   return {
     claim: edited,

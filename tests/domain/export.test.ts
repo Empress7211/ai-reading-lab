@@ -1,23 +1,26 @@
 import { describe, expect, it } from "vitest";
 import { renderPaperMarkdown } from "../../src/domain/export";
 import { acceptClaim, editAndAcceptClaim, rejectClaim } from "../../src/domain/review";
-import { anchor, anchors, draftClaim, reviewContext } from "./fixtures";
+import { anchor, anchors, draftClaim, evidenceLinkForClaim, evidenceLinks, reviewContext } from "./fixtures";
 
 describe("deterministic Markdown export", () => {
   it("exports only Verified claims in stable Claim-id order", () => {
+    const contextFor = (claimId: string) => reviewContext({
+      evidenceLinks: new Map([[evidenceLinkForClaim(claimId).id, evidenceLinkForClaim(claimId)]]),
+    });
     const accepted = acceptClaim(
       draftClaim({ id: "claim-z", claimText: "Verified result Z is supported by the experiment." }),
-      reviewContext(),
+      contextFor("claim-z"),
     ).claim;
     const edited = editAndAcceptClaim(
       draftClaim({ id: "claim-a" }),
       { claimText: "Verified result A reports a 2.1-point improvement." },
-      reviewContext(),
+      contextFor("claim-a"),
     ).claim;
     const rejected = rejectClaim(
       draftClaim({ id: "claim-r", claimText: "Rejected result must never be exported." }),
       "inaccurate",
-      reviewContext(),
+      contextFor("claim-r"),
     ).claim;
     const draft = draftClaim({ id: "claim-d", claimText: "Draft result must never be exported." });
 
@@ -32,6 +35,12 @@ describe("deterministic Markdown export", () => {
       ],
       claims: [accepted, rejected, draft, edited],
       anchors,
+      evidenceLinks: new Map([
+        [evidenceLinkForClaim("claim-z").id, evidenceLinkForClaim("claim-z")],
+        [evidenceLinkForClaim("claim-a").id, evidenceLinkForClaim("claim-a")],
+        [evidenceLinkForClaim("claim-r").id, evidenceLinkForClaim("claim-r")],
+        [evidenceLinkForClaim("claim-d").id, evidenceLinkForClaim("claim-d")],
+      ]),
     } as const;
 
     const first = renderPaperMarkdown(exportData);
@@ -53,6 +62,7 @@ describe("deterministic Markdown export", () => {
       identifiers: [],
       claims: [claim],
       anchors,
+      evidenceLinks,
       pdfPath: "/Users/example/licensed-paper.pdf",
       pdfBytes: "JVBERi0xLjQ=",
     };

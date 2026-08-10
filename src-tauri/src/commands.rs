@@ -18,10 +18,12 @@ pub struct WorkspaceSnapshot {
     pub schema_version: u32,
     pub papers: Vec<Value>,
     pub anchors: Vec<Value>,
+    pub evidence_links: Vec<Value>,
     pub drafts: Vec<Value>,
     pub review_actions: Vec<Value>,
     pub verified_claims: Vec<Value>,
     pub user_notes: Vec<Value>,
+    pub judgments: Vec<Value>,
     pub settings: Value,
 }
 
@@ -30,6 +32,13 @@ pub struct WorkspaceSnapshot {
 pub struct ReviewDraftInput {
     pub action: Value,
     pub verified_claim: Option<Value>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DraftBundleInput {
+    pub draft: Value,
+    pub evidence_links: Vec<Value>,
 }
 
 fn required_string<'a>(value: &'a Value, key: &str) -> Result<&'a str, AppError> {
@@ -99,13 +108,15 @@ fn snapshot(state: &AppState) -> Result<WorkspaceSnapshot, AppError> {
         .next()
         .unwrap_or_else(|| json!({"schemaVersion": 1, "cloudMetadataEnabled": false}));
     Ok(WorkspaceSnapshot {
-        schema_version: 1,
+        schema_version: 2,
         papers: storage::list_json(&connection, "paper")?,
         anchors: storage::list_json(&connection, "anchor")?,
+        evidence_links: storage::list_json(&connection, "evidence_link")?,
         drafts: storage::list_json(&connection, "draft")?,
         review_actions: storage::list_json(&connection, "review_action")?,
         verified_claims: storage::list_json(&connection, "verified_claim")?,
         user_notes: storage::list_json(&connection, "user_note")?,
+        judgments: storage::list_json(&connection, "judgment")?,
         settings,
     })
 }
@@ -280,29 +291,44 @@ pub fn save_anchor(state: State<'_, AppState>, anchor: Value) -> Result<Value, A
 }
 
 #[tauri::command(rename_all = "camelCase")]
-pub fn save_draft(state: State<'_, AppState>, draft: Value) -> Result<Value, AppError> {
-    let id = required_string(&draft, "id")?;
-    required_string(&draft, "paperId")?;
-    required_string(&draft, "paperVersionId")?;
-    required_string(&draft, "claimText")?;
-    if draft.get("reviewStatus").and_then(Value::as_str) != Some("draft")
-        || draft.get("createdBy").and_then(Value::as_str) != Some("ai")
-    {
+pub fn save_draft_bundle(
+    state: State<'_, AppState>,
+    bundle: DraftBundleInput,
+) -> Result<Value, AppError> {
+    let draft = &bundle.draft;
+    let id = required_string(draft, "id")?;
+    required_string(draft, "paperId")?;
+    required_string(draft, "paperVersionId")?;
+    required_string(draft, "claimText")?;
+    if draft.get("reviewStatus").and_then(Value::as_str) != Some("draft") {
         return Err(AppError::policy(
             "DRAFT_TRUST_BOUNDARY",
-            "模型提案必须以 AI draft 身份保存",
+            "待审阅 Claim 必须以 draft 状态保存",
         ));
     }
-    let epistemic = required_string(&draft, "epistemicSource")?;
-    let evidence = draft
-        .get("evidence")
+    let creator = required_string(draft, "createdBy")?;
+    if !matches!(creator, "ai" | "user") {
+        return Err(AppError::policy(
+            "DRAFT_CREATOR_INVALID",
+            "Draft 创建者无效",
+        ));
+    }
+    if creator == "ai" && draft.get("modelRunId").and_then(Value::as_str).is_none() {
+        return Err(AppError::policy(
+            "AI_MODEL_RUN_REQUIRED",
+            "AI Draft 必须记录 modelRunId",
+        ));
+    }
+    let epistemic = required_string(draft, "epistemicSource")?;
+    let evidence_link_ids = draft
+        .get("evidenceLinkIds")
         .and_then(Value::as_array)
         .cloned()
         .unwrap_or_default();
     if matches!(
         epistemic,
         "direct_quote" | "author_claim" | "reported_result"
-    ) && evidence.is_empty()
+    ) && evidence_link_ids.is_empty()
     {
         return Err(AppError::policy(
             "CLAIM_EVIDENCE_REQUIRED",
@@ -317,12 +343,41 @@ pub fn save_draft(state: State<'_, AppState>, draft: Value) -> Result<Value, App
             "AI inference 必须明确需要人工审阅",
         ));
     }
-    let connection = storage::connect(&state)?;
-    for anchor_id in evidence
-        .iter()
-        .filter_map(|item| item.get("anchorId"))
-        .filter_map(Value::as_str)
+    if bundle.evidence_links.is_empty() {
+        return Err(AppError::policy(
+            "EVIDENCE_LINK_REQUIRED",
+            "Draft 必须与 EvidenceLink 原子保存",
+        ));
+    }
+    let mut connection = storage::connect(&state)?;
+    let requested_ids: Vec<&str> = evidence_link_ids.iter().filter_map(Value::as_str).collect();
+    if requested_ids.len() != evidence_link_ids.len()
+        || requested_ids.len() != bundle.evidence_links.len()
     {
+        return Err(AppError::policy(
+            "EVIDENCE_LINK_SET_MISMATCH",
+            "Draft 的 evidenceLinkIds 与 EvidenceLink 集合不一致",
+        ));
+    }
+    for (ordinal, link) in bundle.evidence_links.iter().enumerate() {
+        let link_id = required_string(link, "id")?;
+        if !requested_ids.contains(&link_id)
+            || required_string(link, "claimId")? != id
+            || link.get("ordinal").and_then(Value::as_u64) != Some(ordinal as u64)
+        {
+            return Err(AppError::policy(
+                "EVIDENCE_LINK_INVALID",
+                "EvidenceLink 必须属于 Draft，按 ordinal 连续排列并被 Draft 引用",
+            ));
+        }
+        let relation = required_string(link, "relation")?;
+        if !matches!(relation, "support" | "counter" | "qualify" | "context") {
+            return Err(AppError::policy(
+                "EVIDENCE_RELATION_INVALID",
+                "EvidenceLink relation 无效",
+            ));
+        }
+        let anchor_id = required_string(link, "anchorId")?;
         if storage::get_json(&connection, "anchor", anchor_id)?.is_none() {
             return Err(AppError::policy(
                 "ANCHOR_NOT_FOUND",
@@ -330,9 +385,21 @@ pub fn save_draft(state: State<'_, AppState>, draft: Value) -> Result<Value, App
             ));
         }
     }
-    storage::insert_json(&connection, "draft", id, &draft)?;
-    storage::audit(&connection, "DraftClaimCreated", "draft", id, &json!({}))?;
-    Ok(draft)
+    let transaction = connection.transaction()?;
+    for link in &bundle.evidence_links {
+        let link_id = required_string(link, "id")?;
+        storage::insert_json(&transaction, "evidence_link", link_id, link)?;
+    }
+    storage::insert_json(&transaction, "draft", id, draft)?;
+    storage::audit(
+        &transaction,
+        "DraftClaimCreated",
+        "draft",
+        id,
+        &json!({"evidenceLinkCount": bundle.evidence_links.len(), "createdBy": creator}),
+    )?;
+    transaction.commit()?;
+    Ok(json!({"draft": draft, "evidenceLinks": bundle.evidence_links}))
 }
 
 #[tauri::command(rename_all = "camelCase")]
@@ -388,7 +455,7 @@ fn review_draft_inner(state: &AppState, input: ReviewDraftInput) -> Result<Value
             || required_string(verified, "paperVersionId")?
                 != required_string(&draft, "paperVersionId")?
             || required_string(verified, "reviewStatus")? != to_status
-            || verified.get("evidence") != draft.get("evidence")
+            || verified.get("evidenceLinkIds") != draft.get("evidenceLinkIds")
         {
             return Err(AppError::policy(
                 "VERIFIED_OBJECT_MISMATCH",
@@ -423,20 +490,145 @@ fn review_draft_inner(state: &AppState, input: ReviewDraftInput) -> Result<Value
 }
 
 #[tauri::command(rename_all = "camelCase")]
-pub fn save_user_note(state: State<'_, AppState>, note: Value) -> Result<Value, AppError> {
-    let id = required_string(&note, "id")?;
-    required_string(&note, "paperId")?;
-    required_string(&note, "content")?;
-    if note.get("createdBy").and_then(Value::as_str) != Some("user") {
+pub fn save_judgment(state: State<'_, AppState>, judgment: Value) -> Result<Value, AppError> {
+    let id = required_string(&judgment, "id")?;
+    let paper_id = required_string(&judgment, "paperId")?;
+    let paper_version_id = required_string(&judgment, "paperVersionId")?;
+    if judgment.get("createdBy").and_then(Value::as_str) != Some("user") {
         return Err(AppError::policy(
-            "USER_NOTE_PROVENANCE",
-            "用户笔记必须明确标记 createdBy=user",
+            "JUDGMENT_USER_ONLY",
+            "“我的判断”只能由用户创建",
         ));
     }
+    let sections = judgment
+        .get("sections")
+        .and_then(Value::as_object)
+        .ok_or_else(|| AppError::policy("JUDGMENT_SECTIONS_REQUIRED", "缺少结构化判断内容"))?;
+    let keys = [
+        "judgment",
+        "reasoning",
+        "supportingEvidence",
+        "counterEvidence",
+        "uncertainties",
+        "nextValidation",
+    ];
+    if keys.iter().any(|key| !sections.contains_key(*key)) {
+        return Err(AppError::policy(
+            "JUDGMENT_SECTIONS_REQUIRED",
+            "“我的判断”必须包含六个固定部分",
+        ));
+    }
+
     let connection = storage::connect(&state)?;
-    storage::upsert_json(&connection, "user_note", id, &note)?;
-    storage::audit(&connection, "UserNoteSaved", "user_note", id, &json!({}))?;
-    Ok(note)
+    let mut referenced_claim_ids = Vec::new();
+    for key in keys {
+        let section = sections
+            .get(key)
+            .and_then(Value::as_object)
+            .ok_or_else(|| AppError::policy("JUDGMENT_SECTION_INVALID", "判断分区格式无效"))?;
+        let claim_ids = section
+            .get("verifiedClaimIds")
+            .and_then(Value::as_array)
+            .ok_or_else(|| {
+                AppError::policy(
+                    "JUDGMENT_SECTION_INVALID",
+                    "判断分区缺少 Verified Claim 引用",
+                )
+            })?;
+        for claim_id in claim_ids.iter().filter_map(Value::as_str) {
+            let verified =
+                storage::get_json(&connection, "verified_claim", claim_id)?.ok_or_else(|| {
+                    AppError::policy(
+                        "JUDGMENT_VERIFIED_CLAIM_REQUIRED",
+                        format!("Judgment 引用了不存在的 Verified Claim {claim_id}"),
+                    )
+                })?;
+            if required_string(&verified, "paperId")? != paper_id
+                || required_string(&verified, "paperVersionId")? != paper_version_id
+            {
+                return Err(AppError::policy(
+                    "JUDGMENT_CROSS_PAPER_REFERENCE",
+                    "Judgment 不能引用其他论文版本的 Verified Claim",
+                ));
+            }
+            referenced_claim_ids.push(claim_id.to_owned());
+        }
+    }
+
+    let status = required_string(&judgment, "status")?;
+    if status == "complete" {
+        let core_text = sections
+            .get("judgment")
+            .and_then(|section| section.get("text"))
+            .and_then(Value::as_str)
+            .unwrap_or("");
+        if core_text.trim().is_empty()
+            || referenced_claim_ids.is_empty()
+            || judgment
+                .get("completedAt")
+                .and_then(Value::as_str)
+                .is_none()
+        {
+            return Err(AppError::policy(
+                "JUDGMENT_INCOMPLETE",
+                "完成判断前必须写明核心判断、引用至少一条 Verified Claim 并记录完成时间",
+            ));
+        }
+    } else if status != "draft" {
+        return Err(AppError::policy(
+            "JUDGMENT_STATUS_INVALID",
+            "Judgment 状态只能是 draft 或 complete",
+        ));
+    } else if !judgment
+        .get("completedAt")
+        .unwrap_or(&Value::Null)
+        .is_null()
+    {
+        return Err(AppError::policy(
+            "JUDGMENT_COMPLETION_INVALID",
+            "判断草稿不能带有完成时间",
+        ));
+    }
+
+    storage::upsert_json(&connection, "judgment", id, &judgment)?;
+    storage::audit(
+        &connection,
+        if status == "complete" {
+            "JudgmentCompleted"
+        } else {
+            "JudgmentDraftSaved"
+        },
+        "judgment",
+        id,
+        &json!({"verifiedClaimCount": referenced_claim_ids.len()}),
+    )?;
+    Ok(judgment)
+}
+
+#[tauri::command]
+pub fn open_ai_credential_status() -> Value {
+    json!({"configured": false, "credentialRef": null})
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub fn save_open_ai_api_key(_api_key: String) -> Result<Value, AppError> {
+    Err(AppError::policy(
+        "OPENAI_ADAPTER_DEFERRED",
+        "当前构建尚未接入 OpenAI Keychain 适配器；不会保存或回显密钥",
+    ))
+}
+
+#[tauri::command]
+pub fn delete_open_ai_api_key() -> Value {
+    json!({"configured": false, "credentialRef": null})
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub fn generate_drafts(_input: Value) -> Result<Value, AppError> {
+    Err(AppError::policy(
+        "OPENAI_ADAPTER_DEFERRED",
+        "当前构建未配置 OpenAI Draft 适配器；Anchor 已保留，可继续创建人工 Draft",
+    ))
 }
 
 fn contains_secret(value: &Value) -> bool {
@@ -478,75 +670,6 @@ pub fn save_settings(state: State<'_, AppState>, settings: Value) -> Result<Valu
         &json!({"redacted": true}),
     )?;
     Ok(settings)
-}
-
-#[tauri::command(rename_all = "camelCase")]
-pub fn preview_sync(state: State<'_, AppState>, request: Value) -> Result<Value, AppError> {
-    let paper_ids = request
-        .get("paperIds")
-        .and_then(Value::as_array)
-        .cloned()
-        .unwrap_or_default();
-    if paper_ids.is_empty() {
-        return Err(AppError::policy(
-            "SYNC_SCOPE_EMPTY",
-            "同步预览至少需要一篇论文",
-        ));
-    }
-    let plan_id = uuid::Uuid::new_v4().to_string();
-    let requested_target = request
-        .get("target")
-        .and_then(Value::as_str)
-        .unwrap_or("git");
-    let action_target = if requested_target == "zotero" {
-        "zotero"
-    } else {
-        "git"
-    };
-    let operation = if requested_target == "github" {
-        "preview_push"
-    } else {
-        "preview_write"
-    };
-    let actions: Vec<Value> = paper_ids
-        .iter()
-        .filter_map(Value::as_str)
-        .map(|paper_id| {
-            json!({
-                "id": uuid::Uuid::new_v4().to_string(),
-                "target": action_target,
-                "operation": operation,
-                "resourceRef": paper_id,
-                "summary": format!("Preview {operation} for {paper_id}"),
-                "preconditions": ["explicit_user_approval", "adapter_configuration"],
-                "destructive": false
-            })
-        })
-        .collect();
-    let plan = json!({
-        "id": plan_id,
-        "createdBy": "deterministic_executor",
-        "status": "preview",
-        "workspaceId": "local-workspace",
-        "repositoryPath": null,
-        "gitBranch": null,
-        "zoteroLibraryId": null,
-        "actions": actions,
-        "warnings": ["当前只生成确定性预览；未配置任何外部写入执行器。"],
-        "createdAt": chrono::Utc::now().to_rfc3339(),
-        "approvedAt": null,
-        "approvedBy": null
-    });
-    let connection = storage::connect(&state)?;
-    storage::insert_json(&connection, "sync_plan", &plan_id, &plan)?;
-    storage::audit(
-        &connection,
-        "SyncPreviewCreated",
-        "sync_plan",
-        &plan_id,
-        &json!({"willExecute": false}),
-    )?;
-    Ok(plan)
 }
 
 trait OptionalRow<T> {

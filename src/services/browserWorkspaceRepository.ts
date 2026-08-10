@@ -1,20 +1,23 @@
 import type {
   DraftProposal,
   EvidenceAnchor,
-  NoteBlock,
+  EvidenceLink,
+  JudgmentNote,
   Paper,
   ReviewAction,
-  SyncPlan,
   VerifiedClaim,
 } from '../domain';
-import { assertValidClaim, validateAnchor } from '../domain';
+import { assertValidClaim, assertValidJudgment, validateAnchor } from '../domain';
 import { createBrowserStore, type BrowserStore, type BrowserStoreOptions } from './browserStore';
 import {
   DEFAULT_WORKSPACE_SETTINGS,
+  type DraftBundle,
+  type GenerateDraftsInput,
+  type GenerateDraftsResult,
   type ImportPdfInput,
   type ImportedPdf,
+  type OpenAiCredentialStatus,
   type ReviewDraftInput,
-  type SyncPreviewRequest,
   type WorkspaceRepository,
   type WorkspaceSeed,
   type WorkspaceSettings,
@@ -35,14 +38,54 @@ function clone<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T;
 }
 
+interface LegacyEvidence {
+  anchorId: string;
+  supportType?: EvidenceLink['supportType'];
+  quotedFragment?: string | null;
+  notes?: string | null;
+}
+
+function migrateClaimEvidence<T extends DraftProposal | VerifiedClaim>(
+  claim: T,
+  links: EvidenceLink[],
+): T {
+  const legacy = (claim as T & { evidence?: LegacyEvidence[] }).evidence;
+  if (Array.isArray(claim.evidenceLinkIds)) return claim;
+  const evidenceLinkIds = (legacy ?? []).map((item, ordinal) => {
+    const id = `legacy-${claim.id}-${ordinal}`;
+    if (!links.some((link) => link.id === id)) {
+      links.push({
+        id,
+        claimId: claim.id,
+        anchorId: item.anchorId,
+        relation: 'support',
+        supportType: item.supportType ?? 'context',
+        quotedFragment: item.quotedFragment ?? null,
+        note: item.notes ?? null,
+        ordinal,
+      });
+    }
+    return id;
+  });
+  const migrated = { ...claim, evidenceLinkIds } as T & { evidence?: LegacyEvidence[] };
+  delete migrated.evidence;
+  return migrated;
+}
+
 function emptySnapshot(seed: WorkspaceSeed = {}): WorkspaceSnapshot {
+  const evidenceLinks = clone(seed.evidenceLinks ?? []);
+  const drafts = clone(seed.drafts ?? []).map((claim) => migrateClaimEvidence(claim, evidenceLinks));
+  const verifiedClaims = clone(seed.verifiedClaims ?? [])
+    .map((claim) => migrateClaimEvidence(claim, evidenceLinks));
   return {
     papers: clone(seed.papers ?? []),
     anchors: clone(seed.anchors ?? []),
-    drafts: clone(seed.drafts ?? []),
+    evidenceLinks,
+    drafts,
     reviewActions: clone(seed.reviewActions ?? []),
-    verifiedClaims: clone(seed.verifiedClaims ?? []),
+    verifiedClaims,
     userNotes: clone(seed.userNotes ?? []),
+    judgments: clone(seed.judgments ?? []),
     settings: {
       ...DEFAULT_WORKSPACE_SETTINGS,
       ...clone(seed.settings ?? {}),
@@ -216,21 +259,40 @@ export class BrowserWorkspaceRepository implements WorkspaceRepository {
     return clone(anchor);
   }
 
-  async saveDraft(draft: DraftProposal): Promise<DraftProposal> {
+  async saveDraftBundle(bundle: DraftBundle): Promise<DraftBundle> {
+    const { draft, evidenceLinks } = bundle;
     await this.#update((state) => {
-      if (draft.reviewStatus !== 'draft' || draft.createdBy !== 'ai') {
-        throw new Error('DraftProposal 必须保持 AI draft 身份。');
+      if (draft.reviewStatus !== 'draft') {
+        throw new Error('DraftProposal 必须保持 draft 状态。');
+      }
+      if (draft.createdBy === 'ai' && !draft.modelRunId) {
+        throw new Error('AI DraftProposal 必须记录 modelRunId。');
       }
       if (state.drafts.some((candidate) => candidate.id === draft.id)) {
         throw new Error('DraftProposal 已存在，原始 Draft 不能被改写。');
       }
-      assertValidClaim(draft, new Map(state.anchors.map((anchor) => [anchor.id, anchor])));
+      if (evidenceLinks.length === 0 || evidenceLinks.some((link) => link.claimId !== draft.id)) {
+        throw new Error('DraftProposal 必须随属于它的 EvidenceLink 一起保存。');
+      }
+      if (evidenceLinks.some((link) => state.evidenceLinks.some((existing) => existing.id === link.id))) {
+        throw new Error('EvidenceLink 已存在，不能原地改写。');
+      }
+      const linkMap = new Map([
+        ...state.evidenceLinks.map((link) => [link.id, link] as const),
+        ...evidenceLinks.map((link) => [link.id, link] as const),
+      ]);
+      assertValidClaim(
+        draft,
+        new Map(state.anchors.map((anchor) => [anchor.id, anchor])),
+        linkMap,
+      );
       return {
         ...state,
+        evidenceLinks: [...state.evidenceLinks, ...clone(evidenceLinks)],
         drafts: [...state.drafts, clone(draft)],
       };
     });
-    return clone(draft);
+    return clone(bundle);
   }
 
   async reviewDraft(input: ReviewDraftInput): Promise<ReviewAction> {
@@ -263,7 +325,7 @@ export class BrowserWorkspaceRepository implements WorkspaceRepository {
           || verified.paperId !== draft.paperId
           || verified.paperVersionId !== draft.paperVersionId
           || verified.reviewStatus !== expectedStatus
-          || JSON.stringify(verified.evidence) !== JSON.stringify(draft.evidence)
+          || JSON.stringify(verified.evidenceLinkIds) !== JSON.stringify(draft.evidenceLinkIds)
         ) {
           throw new Error('VerifiedClaim 必须保留 Draft 的身份、论文版本与证据引用。');
         }
@@ -279,12 +341,17 @@ export class BrowserWorkspaceRepository implements WorkspaceRepository {
     return clone(input.action);
   }
 
-  async saveUserNote(note: NoteBlock): Promise<NoteBlock> {
+  async saveJudgment(judgment: JudgmentNote): Promise<JudgmentNote> {
+    const state = await this.initialize();
+    assertValidJudgment(
+      judgment,
+      new Map(state.verifiedClaims.map((claim) => [claim.id, claim])),
+    );
     await this.#update((state) => ({
       ...state,
-      userNotes: upsert(state.userNotes, note),
+      judgments: upsert(state.judgments, judgment),
     }));
-    return clone(note);
+    return clone(judgment);
   }
 
   async saveSettings(settings: WorkspaceSettings): Promise<WorkspaceSettings> {
@@ -292,35 +359,20 @@ export class BrowserWorkspaceRepository implements WorkspaceRepository {
     return clone(settings);
   }
 
-  async previewSync(request: SyncPreviewRequest): Promise<SyncPlan> {
-    const state = await this.initialize();
-    const selectedPaperIds = new Set(request.paperIds);
-    const selectedPapers = state.papers.filter((paper) => selectedPaperIds.has(identityOf(paper) ?? ''));
-    const now = new Date().toISOString();
-    return {
-      id: createId(),
-      createdBy: 'deterministic_executor',
-      status: 'preview',
-      workspaceId: 'browser-local',
-      repositoryPath: null,
-      gitBranch: null,
-      zoteroLibraryId: null,
-      actions: selectedPapers.map((paper) => ({
-        id: createId(),
-        target: request.target === 'zotero' ? 'zotero' : 'git',
-        operation: request.target === 'github' ? 'preview_push' : 'preview_write',
-        resourceRef: paper.id,
-        summary: `Preview ${paper.title}`,
-        preconditions: ['explicit_user_approval'],
-        destructive: false,
-      })),
-      warnings: [
-        'Preview only. No Zotero, Git, or GitHub operation has been executed.',
-      ],
-      createdAt: now,
-      approvedAt: null,
-      approvedBy: null,
-    } satisfies SyncPlan;
+  async openAiCredentialStatus(): Promise<OpenAiCredentialStatus> {
+    return { configured: false, credentialRef: null };
+  }
+
+  async saveOpenAiApiKey(): Promise<OpenAiCredentialStatus> {
+    throw new Error('OpenAI API Key 只能在 PaperWeave macOS 应用的系统 Keychain 中配置。');
+  }
+
+  async deleteOpenAiApiKey(): Promise<OpenAiCredentialStatus> {
+    return { configured: false, credentialRef: null };
+  }
+
+  async generateDrafts(_input: GenerateDraftsInput): Promise<GenerateDraftsResult> {
+    throw new Error('AI Draft 只在 PaperWeave macOS 应用中可用；浏览器开发模式不会保存密钥或伪造结果。');
   }
 
   async #update(

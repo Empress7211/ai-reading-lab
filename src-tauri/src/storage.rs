@@ -11,7 +11,7 @@ pub struct AppState {
 }
 
 pub fn initialize(db_path: &Path) -> Result<(), AppError> {
-    let connection = Connection::open(db_path)?;
+    let mut connection = Connection::open(db_path)?;
     connection.execute_batch(
         r#"
         PRAGMA journal_mode = WAL;
@@ -55,6 +55,73 @@ pub fn initialize(db_path: &Path) -> Result<(), AppError> {
         "INSERT OR IGNORE INTO app_meta(key, value) VALUES ('schema_version', '1')",
         [],
     )?;
+    let schema_version: u32 = connection
+        .query_row(
+            "SELECT value FROM app_meta WHERE key = 'schema_version'",
+            [],
+            |row| row.get::<_, String>(0),
+        )?
+        .parse()
+        .unwrap_or(1);
+    if schema_version < 2 {
+        migrate_embedded_evidence_to_links(&mut connection)?;
+    }
+    Ok(())
+}
+
+fn migrate_embedded_evidence_to_links(connection: &mut Connection) -> Result<(), AppError> {
+    let transaction = connection.transaction()?;
+    for entity_type in ["draft", "verified_claim"] {
+        let entities = list_json(&transaction, entity_type)?;
+        for mut entity in entities {
+            let claim_id = entity
+                .get("id")
+                .and_then(Value::as_str)
+                .ok_or_else(|| AppError::policy("MIGRATION_CLAIM_ID", "旧 Claim 缺少 id"))?
+                .to_owned();
+            if entity.get("evidenceLinkIds").is_some() {
+                continue;
+            }
+            let legacy_evidence = entity
+                .get("evidence")
+                .and_then(Value::as_array)
+                .cloned()
+                .unwrap_or_default();
+            let mut link_ids = Vec::with_capacity(legacy_evidence.len());
+            for (ordinal, evidence) in legacy_evidence.iter().enumerate() {
+                let anchor_id = evidence
+                    .get("anchorId")
+                    .and_then(Value::as_str)
+                    .ok_or_else(|| {
+                        AppError::policy("MIGRATION_ANCHOR_ID", "旧 Claim evidence 缺少 anchorId")
+                    })?;
+                let link_id = format!("legacy-{claim_id}-{ordinal}");
+                let link = serde_json::json!({
+                    "id": link_id.clone(),
+                    "claimId": claim_id.clone(),
+                    "anchorId": anchor_id,
+                    "relation": "support",
+                    "supportType": evidence.get("supportType").cloned().unwrap_or_else(|| Value::String("context".to_owned())),
+                    "quotedFragment": evidence.get("quotedFragment").cloned().unwrap_or(Value::Null),
+                    "note": evidence.get("notes").cloned().unwrap_or(Value::Null),
+                    "ordinal": ordinal,
+                });
+                upsert_json(&transaction, "evidence_link", &link_id, &link)?;
+                link_ids.push(Value::String(link_id));
+            }
+            let object = entity.as_object_mut().ok_or_else(|| {
+                AppError::policy("MIGRATION_CLAIM_OBJECT", "旧 Claim 不是 JSON object")
+            })?;
+            object.remove("evidence");
+            object.insert("evidenceLinkIds".to_owned(), Value::Array(link_ids));
+            upsert_json(&transaction, entity_type, &claim_id, &entity)?;
+        }
+    }
+    transaction.execute(
+        "UPDATE app_meta SET value = '2' WHERE key = 'schema_version'",
+        [],
+    )?;
+    transaction.commit()?;
     Ok(())
 }
 

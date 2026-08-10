@@ -5,7 +5,7 @@ const PDF_STORE = 'pdfs';
 const SNAPSHOT_KEY = 'snapshot';
 
 interface PersistedWorkspace {
-  schemaVersion: 1;
+  schemaVersion: 1 | 2;
   snapshot: WorkspaceSnapshot;
 }
 
@@ -17,7 +17,7 @@ export interface PdfAssetRecord {
 }
 
 export interface BrowserStore {
-  readonly runtime: 'browser-indexeddb' | 'browser-localstorage';
+  readonly runtime: 'browser-indexeddb';
   loadSnapshot(): Promise<WorkspaceSnapshot | null>;
   saveSnapshot(snapshot: WorkspaceSnapshot): Promise<void>;
   savePdf(asset: PdfAssetRecord): Promise<void>;
@@ -29,49 +29,6 @@ function cloneSnapshot(snapshot: WorkspaceSnapshot): WorkspaceSnapshot {
     return structuredClone(snapshot);
   }
   return JSON.parse(JSON.stringify(snapshot)) as WorkspaceSnapshot;
-}
-
-export class LocalStorageBrowserStore implements BrowserStore {
-  readonly runtime = 'browser-localstorage' as const;
-  readonly #pdfBytes = new Map<string, ArrayBuffer>();
-
-  constructor(
-    private readonly storage: Storage,
-    private readonly storageKey = 'paperweave.workspace.v1',
-  ) {}
-
-  async loadSnapshot(): Promise<WorkspaceSnapshot | null> {
-    const raw = this.storage.getItem(this.storageKey);
-    if (!raw) {
-      return null;
-    }
-
-    try {
-      const persisted = JSON.parse(raw) as PersistedWorkspace;
-      if (persisted.schemaVersion !== 1 || !persisted.snapshot) {
-        return null;
-      }
-      return cloneSnapshot(persisted.snapshot);
-    } catch {
-      return null;
-    }
-  }
-
-  async saveSnapshot(snapshot: WorkspaceSnapshot): Promise<void> {
-    const persisted: PersistedWorkspace = {
-      schemaVersion: 1,
-      snapshot: cloneSnapshot(snapshot),
-    };
-    this.storage.setItem(this.storageKey, JSON.stringify(persisted));
-  }
-
-  async savePdf(asset: PdfAssetRecord): Promise<void> {
-    this.#pdfBytes.set(asset.paperId, asset.bytes.slice(0));
-  }
-
-  async loadPdf(paperId: string): Promise<ArrayBuffer | null> {
-    return this.#pdfBytes.get(paperId)?.slice(0) ?? null;
-  }
 }
 
 export class IndexedDbBrowserStore implements BrowserStore {
@@ -105,12 +62,14 @@ export class IndexedDbBrowserStore implements BrowserStore {
       'readonly',
       (store) => store.get(SNAPSHOT_KEY),
     );
-    return record?.schemaVersion === 1 ? cloneSnapshot(record.snapshot) : null;
+    return record && (record.schemaVersion === 1 || record.schemaVersion === 2)
+      ? cloneSnapshot(record.snapshot)
+      : null;
   }
 
   async saveSnapshot(snapshot: WorkspaceSnapshot): Promise<void> {
     const record: PersistedWorkspace = {
-      schemaVersion: 1,
+      schemaVersion: 2,
       snapshot: cloneSnapshot(snapshot),
     };
     await this.#request(WORKSPACE_STORE, 'readwrite', (store) =>
@@ -150,66 +109,17 @@ export class IndexedDbBrowserStore implements BrowserStore {
   }
 }
 
-class FallbackBrowserStore implements BrowserStore {
-  #primaryFailed = false;
-
-  constructor(
-    private readonly primary: BrowserStore,
-    private readonly fallback: BrowserStore,
-  ) {}
-
-  get runtime(): BrowserStore['runtime'] {
-    return this.#primaryFailed ? this.fallback.runtime : this.primary.runtime;
-  }
-
-  loadSnapshot(): Promise<WorkspaceSnapshot | null> {
-    return this.#run((store) => store.loadSnapshot());
-  }
-
-  saveSnapshot(snapshot: WorkspaceSnapshot): Promise<void> {
-    return this.#run((store) => store.saveSnapshot(snapshot));
-  }
-
-  savePdf(asset: PdfAssetRecord): Promise<void> {
-    return this.#run((store) => store.savePdf(asset));
-  }
-
-  loadPdf(paperId: string): Promise<ArrayBuffer | null> {
-    return this.#run((store) => store.loadPdf(paperId));
-  }
-
-  async #run<T>(operation: (store: BrowserStore) => Promise<T>): Promise<T> {
-    if (this.#primaryFailed) {
-      return operation(this.fallback);
-    }
-
-    try {
-      return await operation(this.primary);
-    } catch {
-      this.#primaryFailed = true;
-      return operation(this.fallback);
-    }
-  }
-}
-
 export interface BrowserStoreOptions {
   indexedDB?: IDBFactory | null;
-  localStorage?: Storage;
   databaseName?: string;
-  storageKey?: string;
 }
 
 export function createBrowserStore(options: BrowserStoreOptions = {}): BrowserStore {
-  const localStorage = options.localStorage ?? window.localStorage;
-  const fallback = new LocalStorageBrowserStore(localStorage, options.storageKey);
   const indexedDb = options.indexedDB === undefined ? window.indexedDB : options.indexedDB;
 
   if (!indexedDb) {
-    return fallback;
+    throw new Error('PaperWeave browser development requires IndexedDB; no persistence fallback is used.');
   }
 
-  return new FallbackBrowserStore(
-    new IndexedDbBrowserStore(indexedDb, options.databaseName),
-    fallback,
-  );
+  return new IndexedDbBrowserStore(indexedDb, options.databaseName);
 }

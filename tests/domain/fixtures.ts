@@ -1,4 +1,4 @@
-import type { Claim, EvidenceAnchor, ReviewContext } from "../../src/domain/types";
+import type { Claim, EvidenceAnchor, EvidenceLink, ReviewContext } from "../../src/domain/types";
 
 export const anchor: EvidenceAnchor = {
   id: "10000000-0000-4000-8000-000000000001",
@@ -20,22 +20,37 @@ export const anchor: EvidenceAnchor = {
 
 export const anchors = new Map([[anchor.id, anchor]]);
 
-export function draftClaim(overrides: Partial<Claim> = {}): Claim {
+export const evidenceLink: EvidenceLink = {
+  id: "70000000-0000-4000-8000-000000000001",
+  claimId: "30000000-0000-4000-8000-000000000001",
+  anchorId: anchor.id,
+  relation: "support",
+  supportType: "reported_result",
+  quotedFragment: "improves accuracy by 2.1 absolute points",
+  note: null,
+  ordinal: 0,
+};
+
+export const evidenceLinks = new Map([[evidenceLink.id, evidenceLink]]);
+
+export function evidenceLinkForClaim(claimId: string): EvidenceLink {
   return {
-    id: "30000000-0000-4000-8000-000000000001",
+    ...evidenceLink,
+    id: claimId === evidenceLink.claimId ? evidenceLink.id : `link-${claimId}`,
+    claimId,
+  };
+}
+
+export function draftClaim(overrides: Partial<Claim> = {}): Claim {
+  const claimId = overrides.id ?? evidenceLink.claimId;
+  return {
+    id: claimId,
     paperId: "40000000-0000-4000-8000-000000000001",
     paperVersionId: anchor.paperVersionId,
     claimText: "The method improves accuracy by 2.1 absolute points on Dataset A.",
     claimType: "empirical",
     epistemicSource: "reported_result",
-    evidence: [
-      {
-        anchorId: anchor.id,
-        supportType: "reported_result",
-        quotedFragment: "improves accuracy by 2.1 absolute points",
-        notes: null,
-      },
-    ],
+    evidenceLinkIds: [evidenceLinkForClaim(claimId).id],
     assumptions: [],
     scopeConditions: ["Dataset A test split"],
     limitations: [],
@@ -62,6 +77,7 @@ export function reviewContext(overrides: Partial<ReviewContext> = {}): ReviewCon
     actorId: "user-1",
     occurredAt: "2026-08-04T01:00:00.000Z",
     anchors,
+    evidenceLinks,
     ...overrides,
   };
 }
