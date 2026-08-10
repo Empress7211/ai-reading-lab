@@ -1,0 +1,38 @@
+:root {
+  color-scheme: light;
+  --pw-bg: #f3f5f2;
+  --pw-surface: #ffffff;
+  --pw-surface-2: #f8f9f7;
+  --pw-surface-3: #eef1ed;
+  --pw-ink: #18201d;
+  --pw-muted: #58655f;
+  --pw-muted-2: #68756f;
+  --pw-line: #d9dfda;
+  --pw-line-strong: #c5cec8;
+  --pw-accent: #2d5d73;
+  --pw-accent-soft: #e8f1f4;
+  --pw-foundation: #865808;
+  --pw-foundation-soft: #f7efd9;
+  --pw-frontier: #315e93;
+  --pw-frontier-soft: #e7eef7;
+  --pw-counter: #914139;
+  --pw-counter-soft: #f7e8e5;
+  --pw-bridge: #6d5b8e;
+  --pw-bridge-soft: #eee9f5;
+  --pw-resource: #456957;
+  --pw-resource-soft: #e7f0eb;
+  --pw-success: #286248;
+  --pw-success-soft: #e5f1eb;
+  --pw-danger: #963737;
+  --pw-danger-soft: #f8e9e7;
+  --pw-shadow-sm: 0 1px 2px rgb(24 32 29 / 5%), 0 8px 24px rgb(24 32 29 / 5%);
+  --pw-shadow-md: 0 20px 60px rgb(24 32 29 / 18%);
+  --pw-radius-sm: 8px;
+  --pw-radius: 12px;
+  --pw-radius-lg: 18px;
+  --pw-sidebar: 232px;
+  --pw-topbar: 62px;
+  --pw-font-ui: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  --pw-font-reading: "Songti SC", "Noto Serif CJK SC", Georgia, "Times New Roman", serif;
+  font-family: var(--pw-font-ui);
+}

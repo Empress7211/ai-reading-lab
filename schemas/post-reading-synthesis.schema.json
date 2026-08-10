@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://paperweave.local/schemas/post-reading-synthesis.schema.json",
+  "title": "PaperWeave Post-reading Synthesis Proposal",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "review_status", "completion_check", "contribution_compression", "evidence_assessment", "scope_and_limits", "reproduction_checklist", "topic_delta", "next_actions"],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "review_status": { "const": "draft" },
+    "completion_check": { "$ref": "#/$defs/completion" },
+    "contribution_compression": { "type": "array", "maxItems": 8, "items": { "$ref": "#/$defs/grounded" } },
+    "evidence_assessment": { "type": "array", "maxItems": 12, "items": { "$ref": "#/$defs/assessment" } },
+    "scope_and_limits": { "type": "array", "maxItems": 12, "items": { "$ref": "#/$defs/limit" } },
+    "reproduction_checklist": { "type": "array", "maxItems": 30, "items": { "$ref": "#/$defs/reproduction" } },
+    "topic_delta": { "$ref": "#/$defs/topicDelta" },
+    "next_actions": { "type": "array", "maxItems": 12, "items": { "$ref": "#/$defs/action" } }
+  },
+  "$defs": {
+    "uuid": { "type": "string", "format": "uuid" },
+    "ids": { "type": "array", "uniqueItems": true, "items": { "$ref": "#/$defs/uuid" } },
+    "completion": {
+      "type": "object", "additionalProperties": false, "required": ["status", "missing_critical_sections", "unresolved_review_items", "evidence_issues"],
+      "properties": { "status": { "type": "string", "enum": ["ready", "review_recommended", "incomplete"] }, "missing_critical_sections": { "type": "array", "items": { "type": "string", "maxLength": 200 } }, "unresolved_review_items": { "$ref": "#/$defs/ids" }, "evidence_issues": { "type": "array", "items": { "type": "string", "maxLength": 500 } } }
+    },
+    "grounded": { "type": "object", "additionalProperties": false, "required": ["text", "claim_ids", "anchor_ids"], "properties": { "text": { "type": "string", "maxLength": 1500 }, "claim_ids": { "$ref": "#/$defs/ids" }, "anchor_ids": { "$ref": "#/$defs/ids" } } },
+    "assessment": { "type": "object", "additionalProperties": false, "required": ["proposition", "strength", "reason", "claim_ids"], "properties": { "proposition": { "type": "string", "maxLength": 1000 }, "strength": { "type": "string", "enum": ["strong", "moderate", "weak", "unclear"] }, "reason": { "type": "string", "maxLength": 1000 }, "claim_ids": { "$ref": "#/$defs/ids" } } },
+    "limit": { "type": "object", "additionalProperties": false, "required": ["text", "source", "claim_ids", "anchor_ids"], "properties": { "text": { "type": "string", "maxLength": 1000 }, "source": { "type": "string", "enum": ["author_stated", "evidence_inferred", "user_judgment"] }, "claim_ids": { "$ref": "#/$defs/ids" }, "anchor_ids": { "$ref": "#/$defs/ids" } } },
+    "reproduction": { "type": "object", "additionalProperties": false, "required": ["item", "status", "claim_ids"], "properties": { "item": { "type": "string", "maxLength": 500 }, "status": { "type": "string", "enum": ["available", "missing", "unclear", "not_applicable"] }, "claim_ids": { "$ref": "#/$defs/ids" } } },
+    "topicDelta": { "type": "object", "additionalProperties": false, "required": ["draft_update", "questions_for_user", "needs_user_confirmation"], "properties": { "draft_update": { "type": "string", "maxLength": 2000 }, "questions_for_user": { "type": "array", "minItems": 1, "maxItems": 8, "items": { "type": "string", "maxLength": 500 } }, "needs_user_confirmation": { "const": true } } },
+    "action": { "type": "object", "additionalProperties": false, "required": ["type", "text", "reason"], "properties": { "type": { "type": "string", "enum": ["read_next", "verify", "reproduce", "compare", "research_question"] }, "text": { "type": "string", "maxLength": 800 }, "reason": { "type": "string", "maxLength": 800 } } }
+  }
+}

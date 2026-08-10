@@ -1,0 +1,88 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://paperweave.local/schemas/review-record.schema.json",
+  "title": "PaperWeave Review Record",
+  "description": "User review is stored separately from the immutable AI draft. Accepted or edited reviews produce a distinct verified object.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "review_action", "verified_object"],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "review_action": { "$ref": "#/$defs/reviewAction" },
+    "verified_object": {
+      "oneOf": [
+        { "$ref": "#/$defs/verifiedClaim" },
+        { "type": "null" }
+      ]
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "review_action": {
+            "properties": { "action": { "enum": ["accepted", "edited"] } },
+            "required": ["action"]
+          }
+        }
+      },
+      "then": { "properties": { "verified_object": { "$ref": "#/$defs/verifiedClaim" } } }
+    },
+    {
+      "if": {
+        "properties": {
+          "review_action": {
+            "properties": { "action": { "const": "rejected" } },
+            "required": ["action"]
+          }
+        }
+      },
+      "then": { "properties": { "verified_object": { "type": "null" } } }
+    }
+  ],
+  "$defs": {
+    "uuid": { "type": "string", "format": "uuid" },
+    "reviewAction": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "draft_id", "action", "reviewed_by", "reviewed_at"],
+      "properties": {
+        "id": { "$ref": "#/$defs/uuid" },
+        "draft_id": { "$ref": "#/$defs/uuid" },
+        "action": { "type": "string", "enum": ["accepted", "edited", "rejected"] },
+        "edited_text": { "type": ["string", "null"], "minLength": 1, "maxLength": 5000 },
+        "reason": { "type": ["string", "null"], "maxLength": 1000 },
+        "reviewed_by": { "const": "user" },
+        "reviewed_at": { "type": "string", "format": "date-time" }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "action": { "const": "edited" } }, "required": ["action"] },
+          "then": { "required": ["edited_text"] }
+        }
+      ]
+    },
+    "verifiedClaim": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id", "source_draft_id", "review_action_id", "paper_id", "claim_text",
+        "claim_type", "epistemic_source", "evidence_anchor_ids", "review_status",
+        "ai_provenance_retained", "verified_at"
+      ],
+      "properties": {
+        "id": { "$ref": "#/$defs/uuid" },
+        "source_draft_id": { "$ref": "#/$defs/uuid" },
+        "review_action_id": { "$ref": "#/$defs/uuid" },
+        "paper_id": { "$ref": "#/$defs/uuid" },
+        "claim_text": { "type": "string", "minLength": 5, "maxLength": 1500 },
+        "claim_type": { "type": "string", "enum": ["theoretical", "empirical", "methodological", "descriptive", "interpretive", "normative"] },
+        "epistemic_source": { "type": "string", "enum": ["direct_quote", "author_claim", "reported_result", "ai_inference", "external_metadata"] },
+        "evidence_anchor_ids": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "$ref": "#/$defs/uuid" } },
+        "review_status": { "type": "string", "enum": ["accepted", "edited"] },
+        "ai_provenance_retained": { "const": true },
+        "verified_at": { "type": "string", "format": "date-time" }
+      }
+    }
+  }
+}

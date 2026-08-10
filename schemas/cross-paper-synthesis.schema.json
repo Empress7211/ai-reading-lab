@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://paperweave.local/schemas/cross-paper-synthesis.schema.json",
+  "title": "PaperWeave Cross-paper Synthesis Proposal",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "review_status", "verified_input_only", "propositions", "method_evolution", "evidence_gaps", "recommended_next_reading_questions"],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "review_status": { "const": "draft" },
+    "verified_input_only": { "const": true },
+    "propositions": { "type": "array", "maxItems": 50, "items": { "$ref": "#/$defs/proposition" } },
+    "method_evolution": { "type": "array", "maxItems": 30, "items": { "$ref": "#/$defs/evolution" } },
+    "evidence_gaps": { "type": "array", "maxItems": 30, "items": { "$ref": "#/$defs/gap" } },
+    "recommended_next_reading_questions": { "type": "array", "maxItems": 20, "items": { "type": "string", "maxLength": 800 } }
+  },
+  "$defs": {
+    "uuid": { "type": "string", "format": "uuid" },
+    "ids": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "$ref": "#/$defs/uuid" } },
+    "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+    "dimensions": { "type": "object", "additionalProperties": false, "required": ["definition", "data_or_population", "method_or_intervention", "metric_or_outcome", "study_design"], "properties": { "definition": { "$ref": "#/$defs/texts" }, "data_or_population": { "$ref": "#/$defs/texts" }, "method_or_intervention": { "$ref": "#/$defs/texts" }, "metric_or_outcome": { "$ref": "#/$defs/texts" }, "study_design": { "$ref": "#/$defs/texts" } } },
+    "texts": { "type": "array", "maxItems": 20, "items": { "type": "string", "maxLength": 300 } },
+    "stance": { "type": "object", "additionalProperties": false, "required": ["paper_id", "stance", "claim_ids", "reason", "confidence"], "properties": { "paper_id": { "$ref": "#/$defs/uuid" }, "stance": { "type": "string", "enum": ["support", "counter", "qualify", "incomparable", "unclear"] }, "claim_ids": { "$ref": "#/$defs/ids" }, "reason": { "type": "string", "maxLength": 1200 }, "confidence": { "$ref": "#/$defs/confidence" } } },
+    "synthesis": { "type": "object", "additionalProperties": false, "required": ["text", "claim_ids", "certainty"], "properties": { "text": { "type": "string", "maxLength": 2500 }, "claim_ids": { "$ref": "#/$defs/ids" }, "certainty": { "type": "string", "enum": ["high", "medium", "low", "unresolved"] } } },
+    "proposition": { "type": "object", "additionalProperties": false, "required": ["canonical_text", "merge_confidence", "needs_user_confirmation", "member_claim_ids", "scope_dimensions", "paper_stances", "synthesis", "comparison_caveats"], "properties": { "canonical_text": { "type": "string", "minLength": 5, "maxLength": 1500 }, "merge_confidence": { "$ref": "#/$defs/confidence" }, "needs_user_confirmation": { "const": true }, "member_claim_ids": { "$ref": "#/$defs/ids" }, "scope_dimensions": { "$ref": "#/$defs/dimensions" }, "paper_stances": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/stance" } }, "synthesis": { "$ref": "#/$defs/synthesis" }, "comparison_caveats": { "type": "array", "maxItems": 20, "items": { "type": "string", "maxLength": 500 } } } },
+    "evolution": { "type": "object", "additionalProperties": false, "required": ["from_paper_id", "to_paper_id", "change", "claim_ids"], "properties": { "from_paper_id": { "$ref": "#/$defs/uuid" }, "to_paper_id": { "$ref": "#/$defs/uuid" }, "change": { "type": "string", "maxLength": 1200 }, "claim_ids": { "$ref": "#/$defs/ids" } } },
+    "gap": { "type": "object", "additionalProperties": false, "required": ["text", "source", "claim_ids", "needs_user_confirmation"], "properties": { "text": { "type": "string", "maxLength": 1200 }, "source": { "type": "string", "enum": ["directly_stated", "coverage_gap", "ai_inference"] }, "claim_ids": { "$ref": "#/$defs/ids" }, "needs_user_confirmation": { "const": true } } }
+  }
+}

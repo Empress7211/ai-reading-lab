@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://paperweave.local/schemas/counterpoint-analysis.schema.json",
+  "title": "PaperWeave Counterpoint Analysis Proposal",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "review_status", "target_proposition", "candidate_position", "classification", "counterpoint_confidence", "same_proposition_confidence", "comparability", "evidence_for_classification", "why_it_matters_for_reading", "caveats", "recommended_role"],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "review_status": { "const": "draft" },
+    "target_proposition": { "type": "string", "minLength": 5, "maxLength": 1500 },
+    "candidate_position": { "type": "string", "minLength": 5, "maxLength": 1500 },
+    "classification": { "type": "string", "enum": ["direct_counter", "replication_failure", "methodological_critique", "boundary_condition", "alternative_explanation", "negative_result", "theoretical_limit", "incomparable", "not_counterpoint", "uncertain"] },
+    "counterpoint_confidence": { "$ref": "#/$defs/confidence" },
+    "same_proposition_confidence": { "$ref": "#/$defs/confidence" },
+    "comparability": { "$ref": "#/$defs/comparability" },
+    "evidence_for_classification": { "type": "array", "minItems": 1, "maxItems": 12, "items": { "$ref": "#/$defs/evidence" } },
+    "why_it_matters_for_reading": { "type": "string", "maxLength": 1500 },
+    "caveats": { "type": "array", "maxItems": 12, "items": { "type": "string", "maxLength": 500 } },
+    "recommended_role": { "type": "string", "enum": ["counterpoint", "bridge", "frontier", "resource", "exclude"] }
+  },
+  "$defs": {
+    "uuid": { "type": "string", "format": "uuid" },
+    "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+    "dimension": { "type": "string", "enum": ["same", "different", "overlapping", "unknown"] },
+    "comparability": {
+      "type": "object", "additionalProperties": false,
+      "required": ["overall", "definition", "data_or_population", "intervention_or_method", "metric_or_outcome", "study_design"],
+      "properties": {
+        "overall": { "type": "string", "enum": ["comparable", "partially_comparable", "incomparable", "unknown"] },
+        "definition": { "$ref": "#/$defs/dimension" },
+        "data_or_population": { "$ref": "#/$defs/dimension" },
+        "intervention_or_method": { "$ref": "#/$defs/dimension" },
+        "metric_or_outcome": { "$ref": "#/$defs/dimension" },
+        "study_design": { "$ref": "#/$defs/dimension" }
+      }
+    },
+    "evidence": {
+      "type": "object", "additionalProperties": false, "required": ["statement", "paper_side", "anchor_ids"],
+      "properties": { "statement": { "type": "string", "maxLength": 1000 }, "paper_side": { "type": "string", "enum": ["target", "candidate"] }, "anchor_ids": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "$ref": "#/$defs/uuid" } } }
+    }
+  }
+}
