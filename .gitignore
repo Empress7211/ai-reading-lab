@@ -1,0 +1,9 @@
+node_modules/
+.pnpm-store/
+dist/
+.vite/
+coverage/
+*.tsbuildinfo
+.DS_Store
+src-tauri/target/
+research-notes/

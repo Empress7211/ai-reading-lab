@@ -65,7 +65,49 @@ python3 -m http.server 8000
 
 原型使用演示数据，不会请求网络、读取 Zotero、调用模型或修改 Git 仓库。
 
-## 6. 验证状态
+## 6. 当前 React / Tauri 垂直切片
+
+仓库根目录现包含可运行的 React/Vite/TypeScript + Tauri/Rust/SQLite 本地实现：
+
+```bash
+pnpm install
+pnpm dev
+pnpm typecheck
+pnpm test
+pnpm build
+cargo test --manifest-path src-tauri/Cargo.toml
+pnpm tauri dev
+pnpm run release:build:macos
+pnpm run release:verify:macos
+```
+
+- 浏览器使用 IndexedDB 保存 PDF、Evidence Anchor、DraftProposal、ReviewAction、VerifiedClaim 与用户笔记；Tauri 使用本机内容寻址 PDF vault 和 SQLite JSON 实体仓库。
+- Reader 会列出已保存 Anchor，在刷新或重启后重绘可见区域，并可点击回到对应 PDF 页；孤立、损坏、PDF 指纹不匹配、PDF 缺失和页码失效都会保留记录并显示明确恢复提示。
+- 本地审阅界面保存并恢复 `DraftProposal → ReviewAction → VerifiedClaim`。所有接受、编辑与驳回均先经过纯函数 `reviewDraftProposal`；Rejected 不产生 VerifiedClaim，Edited 保留原始 Draft，用户笔记独立存储。
+- 当前三条本地审阅内容是明确标记的固定 fixture，只用于验证状态机与持久化；没有接入真实 LLM、BYOK/Keychain、Docling/OCR、Zotero、Git 或 GitHub 写入执行器。
+- 同步功能仍是 preview-only：不会执行 Zotero、Git 或 GitHub 写入。
+- 本地打包可生成 macOS `.app` 与 DMG；当前没有 Developer ID 签名或公证流程，`--no-sign` 产物只用于本机验收与开发交付。
+- `MANIFEST.json` 是原始交付包的历史基线，开发实现加入后不再与当前工作树逐项匹配。
+
+### macOS 发布验证
+
+`release:verify:macos` 会挂载 DMG，并检查版本、bundle identifier、最低系统版本、`.icns`、`PaperWeave.app` 与 `/Applications` 链接、镜像校验，以及 `codesign` / Gatekeeper 的真实结果。默认模式针对本地 `--no-sign` RC，只有在 app 和 DMG **未被 Gatekeeper 接受**、且没有 Developer ID TeamIdentifier 时才通过；这不表示产物已签名或公证。
+
+拿到 Developer ID Application 证书和 App Store Connect API 凭据后，在本机 Keychain 安装证书，通过环境变量提供 Tauri 所需的凭据，再执行不带 `--no-sign` 的构建：
+
+```bash
+export APPLE_SIGNING_IDENTITY='Developer ID Application: <name> (<team-id>)'
+export APPLE_API_ISSUER='<issuer-id>'
+export APPLE_API_KEY='<key-id>'
+export APPLE_API_KEY_PATH='/absolute/path/to/AuthKey_<key-id>.p8'
+
+pnpm tauri build --bundles app,dmg
+PAPERWEAVE_REQUIRE_SIGNED=1 pnpm run release:verify:macos
+```
+
+占位值必须在本地或 CI secret 中替换，不得提交证书、私钥或凭据。signed 模式要求 Developer ID 签名、Gatekeeper 接受，以及 app/DMG 的公证票据验证全部通过；具体凭据格式见 [Tauri macOS signing 文档](https://v2.tauri.app/distribute/sign/macos/)。
+
+## 7. 验证状态
 
 原型已完成静态解析、JavaScript 语法、JSON Schema 与浏览器交互回归：
 
@@ -74,7 +116,9 @@ python3 -m http.server 8000
 - 已覆盖发现页角色数量、三栏阅读器、Claim 接受流程、同步预览、主导航、命令面板、横向溢出与运行时错误；
 - 详细结果见 `prototype/QA_REPORT.json`，参考画面见 `prototype/screenshots/`。
 
-## 7. 当前明确不做
+除原型回归外，React/Tauri 切片已覆盖本地 PDF 导入、Anchor 创建/恢复/回跳、三种审阅动作持久化、用户笔记恢复、无效 PDF 失败路径，以及桌面和移动端无横向溢出与无 console warning/error。真实 macOS `.app` 还完成了完全退出并重启后的 SQLite/PDF vault 恢复，以及 PDF 缺失、PDF 损坏、Anchor 损坏/孤立和页码失效回归；这些失败均保留已有元数据与审阅记录，并显示明确状态。
+
+## 8. 当前明确不做
 
 - 不绕过付费墙、登录或机构访问控制；
 - 不把“一键生成整篇总结”作为核心体验；
@@ -83,7 +127,7 @@ python3 -m http.server 8000
 - 不将 GitHub 设为唯一笔记后端：底层抽象为本地 Git 仓库，GitHub 只是首个远端适配器；
 - 不让未经用户审阅的 AI 草稿自动成为“事实”。
 
-## 8. 本版最重要的产品判断
+## 9. 本版最重要的产品判断
 
 PaperWeave 的壁垒不应是“模型回答得更长”，而应是：
 
