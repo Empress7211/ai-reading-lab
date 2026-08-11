@@ -24,6 +24,7 @@ pub fn run() {
             commands::workspace_snapshot,
             commands::import_local_pdf,
             commands::load_pdf_bytes,
+            commands::update_paper_metadata,
             commands::save_anchor,
             commands::save_draft_bundle,
             commands::review_draft,

@@ -108,6 +108,28 @@ describe('BrowserWorkspaceRepository', () => {
     expect((await new BrowserWorkspaceRepository({ store }).snapshot()).papers[0]?.title).toBe('Trustworthy Notes');
   });
 
+  it('updates paper metadata without replacing its PDF version', async () => {
+    const store = new MemoryStore();
+    const repository = new BrowserWorkspaceRepository({ store });
+    await repository.initialize({ papers: [paper] });
+
+    const updated = await repository.updatePaperMetadata({
+      paperId: paper.id,
+      title: '  Evidence-led Reading  ',
+      authors: ['Ada Lovelace', 'Alan Turing'],
+      year: 2025,
+    });
+
+    expect(updated).toMatchObject({
+      id: paper.id,
+      title: 'Evidence-led Reading',
+      authors: ['Ada Lovelace', 'Alan Turing'],
+      year: 2025,
+      versions: paper.versions,
+    });
+    expect((await new BrowserWorkspaceRepository({ store }).snapshot()).papers[0]?.title).toBe('Evidence-led Reading');
+  });
+
   it('requires Verified Claim references before completing a Judgment', async () => {
     const repository = new BrowserWorkspaceRepository({ store: new MemoryStore() });
     await repository.initialize({ papers: [paper] });

@@ -75,6 +75,13 @@ export interface ImportedPdf {
   objectUrl?: string;
 }
 
+export interface UpdatePaperMetadataInput {
+  paperId: string;
+  title: string;
+  authors: string[];
+  year: number | null;
+}
+
 export interface ReviewDraftInput {
   action: ReviewAction;
   verifiedClaim?: VerifiedClaim;
@@ -107,6 +114,7 @@ export interface WorkspaceRepository {
   snapshot(): Promise<WorkspaceSnapshot>;
   importPdf(input: ImportPdfInput): Promise<ImportedPdf>;
   loadPdfBytes(paperId: string): Promise<ArrayBuffer | null>;
+  updatePaperMetadata(input: UpdatePaperMetadataInput): Promise<Paper>;
   saveAnchor(anchor: EvidenceAnchor): Promise<EvidenceAnchor>;
   saveDraftBundle(bundle: DraftBundle): Promise<DraftBundle>;
   reviewDraft(input: ReviewDraftInput): Promise<ReviewAction>;

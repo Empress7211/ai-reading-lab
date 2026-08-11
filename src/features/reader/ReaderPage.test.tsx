@@ -38,13 +38,18 @@ const bundles = [bundle(1), bundle(2), bundle(3)];
 
 afterEach(cleanup);
 
-function renderReader(entries: PersistedReviewEntry[], onReview = vi.fn().mockResolvedValue(undefined), openLedger = true) {
+function renderReader(
+  entries: PersistedReviewEntry[],
+  onReview = vi.fn().mockResolvedValue(undefined),
+  openLedger = true,
+  onUpdatePaperMetadata = vi.fn().mockResolvedValue(undefined),
+) {
   render(<ReaderPage
     paper={paper} judgment={judgment} verifiedClaims={entries.flatMap((entry) => entry.verifiedClaim ? [entry.verifiedClaim] : [])}
     onBack={() => undefined} onMessage={() => undefined} localPdfFile={null}
     localPdfError="PDF intentionally unavailable in unit test" localAnchors={[anchor]} localPaperVersionId="version-1"
     persistedReviews={entries} nativeFileDialog={false} persistenceLabel="IndexedDB · 浏览器本地"
-    onImportPdf={() => undefined} onAnchorCreate={() => undefined} onCreateManualDraft={async () => undefined}
+    onImportPdf={() => undefined} onUpdatePaperMetadata={onUpdatePaperMetadata} onAnchorCreate={() => undefined} onCreateManualDraft={async () => undefined}
     onRequestAiDraft={async () => { throw new Error('OPENAI_ADAPTER_DEFERRED'); }} onReviewDraft={onReview}
     onSaveJudgment={async () => undefined} onExportMarkdown={() => undefined}
   />);
@@ -62,6 +67,24 @@ describe('Reader persisted review UI', () => {
     expect(screen.getByRole('menuitem', { name: '更换 PDF' })).toBeInTheDocument();
     expect(screen.getByRole('menuitem', { name: '导出 Verified Markdown' })).toBeInTheDocument();
     expect(screen.queryByText(/Zotero/i)).not.toBeInTheDocument();
+  });
+
+  it('edits paper metadata from the document actions menu', async () => {
+    const onUpdatePaperMetadata = vi.fn().mockResolvedValue(undefined);
+    renderReader([], vi.fn().mockResolvedValue(undefined), false, onUpdatePaperMetadata);
+
+    fireEvent.click(screen.getByRole('button', { name: '更多文档操作' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: '编辑论文信息' }));
+    fireEvent.change(screen.getByLabelText('标题'), { target: { value: 'Evidence-First Reading' } });
+    fireEvent.change(screen.getByLabelText('作者'), { target: { value: 'Ada Lovelace, Alan Turing' } });
+    fireEvent.change(screen.getByLabelText('年份'), { target: { value: '2025' } });
+    fireEvent.click(screen.getByRole('button', { name: '保存论文信息' }));
+
+    await waitFor(() => expect(onUpdatePaperMetadata).toHaveBeenCalledWith({
+      title: 'Evidence-First Reading',
+      authors: ['Ada Lovelace', 'Alan Turing'],
+      year: 2025,
+    }));
   });
 
   it('routes Accepted, Edited, and Rejected buttons through the formal review callback', async () => {

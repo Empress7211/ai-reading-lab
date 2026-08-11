@@ -3,6 +3,7 @@ export const TAURI_COMMANDS = {
   getWorkspaceSnapshot: 'workspace_snapshot',
   importLocalPdf: 'import_local_pdf',
   loadPdfBytes: 'load_pdf_bytes',
+  updatePaperMetadata: 'update_paper_metadata',
   saveAnchor: 'save_anchor',
   saveDraftBundle: 'save_draft_bundle',
   reviewDraft: 'review_draft',

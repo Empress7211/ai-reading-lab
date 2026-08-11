@@ -13,6 +13,7 @@ import type {
   ImportedPdf,
   OpenAiCredentialStatus,
   ReviewDraftInput,
+  UpdatePaperMetadataInput,
   WorkspaceRepository,
   WorkspaceSeed,
   WorkspaceSettings,
@@ -76,6 +77,10 @@ export class TauriWorkspaceRepository implements WorkspaceRepository {
       { paperId },
     );
     return normalizePdfBytes(payload);
+  }
+
+  updatePaperMetadata(input: UpdatePaperMetadataInput): Promise<Paper> {
+    return this.#invoke<Paper>(TAURI_COMMANDS.updatePaperMetadata, { input });
   }
 
   saveAnchor(anchor: EvidenceAnchor): Promise<EvidenceAnchor> {

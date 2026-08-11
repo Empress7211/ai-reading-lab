@@ -10,6 +10,7 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   PanelRightOpen,
+  Pencil,
   Sparkles,
   X,
 } from 'lucide-react';
@@ -58,12 +59,19 @@ interface ReaderPageProps {
   nativeFileDialog: boolean;
   persistenceLabel: string;
   onImportPdf: (file?: File) => void;
+  onUpdatePaperMetadata: (metadata: PaperMetadataFormValues) => Promise<void>;
   onAnchorCreate: (anchor: LocalPdfAnchor) => void;
   onCreateManualDraft: (anchorId: string, claimText: string, relation: EvidenceRelation) => Promise<void>;
   onRequestAiDraft: (anchorId: string) => Promise<void>;
   onReviewDraft: (draftId: string, decision: DraftReviewDecision) => Promise<void>;
   onSaveJudgment: (judgment: JudgmentNote) => Promise<void>;
   onExportMarkdown: () => void;
+}
+
+export interface PaperMetadataFormValues {
+  title: string;
+  authors: string[];
+  year: number | null;
 }
 
 const tabs: Array<[ReaderTab, string]> = [
@@ -87,6 +95,7 @@ export function ReaderPage({
   nativeFileDialog,
   persistenceLabel,
   onImportPdf,
+  onUpdatePaperMetadata,
   onAnchorCreate,
   onCreateManualDraft,
   onRequestAiDraft,
@@ -98,6 +107,7 @@ export function ReaderPage({
   const [researchOpen, setResearchOpen] = useState(() => window.innerWidth >= 1024);
   const [outlineOpen, setOutlineOpen] = useState(() => window.innerWidth >= 1240);
   const [toolbarMenuOpen, setToolbarMenuOpen] = useState(false);
+  const [metadataDialogOpen, setMetadataDialogOpen] = useState(false);
   const [activeAnchor, setActiveAnchor] = useState<string | null>(null);
   const [anchorStates, setAnchorStates] = useState<ReadonlyMap<string, AnchorLocationState>>(() => new Map());
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -175,6 +185,7 @@ export function ReaderPage({
       <div className="reader-toolbar-menu" ref={toolbarMenuRef}>
         <Button variant="secondary" className="icon-button" aria-label="更多文档操作" aria-expanded={toolbarMenuOpen} onClick={() => setToolbarMenuOpen((value) => !value)}><Ellipsis size={19} /></Button>
         {toolbarMenuOpen ? <div className="reader-toolbar-popover" role="menu">
+          <button type="button" role="menuitem" onClick={() => { setToolbarMenuOpen(false); setMetadataDialogOpen(true); }}><Pencil size={16} /><span>编辑论文信息</span></button>
           <button type="button" role="menuitem" onClick={() => {
             setToolbarMenuOpen(false);
             if (nativeFileDialog) onImportPdf();
@@ -223,6 +234,81 @@ export function ReaderPage({
         </div>
       </aside>
     </div>
+    {metadataDialogOpen ? <PaperMetadataDialog paper={paper} onClose={() => setMetadataDialogOpen(false)} onSave={onUpdatePaperMetadata} /> : null}
+  </div>;
+}
+
+function PaperMetadataDialog({
+  paper,
+  onClose,
+  onSave,
+}: {
+  paper: Paper;
+  onClose: () => void;
+  onSave: (metadata: PaperMetadataFormValues) => Promise<void>;
+}) {
+  const [title, setTitle] = useState(paper.title);
+  const [authors, setAuthors] = useState(paper.authors.join(', '));
+  const [year, setYear] = useState(paper.year?.toString() ?? '');
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && !saving) onClose();
+    };
+    window.addEventListener('keydown', closeOnEscape);
+    return () => window.removeEventListener('keydown', closeOnEscape);
+  }, [onClose, saving]);
+
+  const submit = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const normalizedTitle = title.trim();
+    if (!normalizedTitle) {
+      setError('论文标题不能为空。');
+      return;
+    }
+    const normalizedYear = year.trim() ? Number(year.trim()) : null;
+    if (normalizedYear !== null && (!Number.isInteger(normalizedYear) || normalizedYear < 1000 || normalizedYear > 9999)) {
+      setError('年份必须是四位整数，或留空。');
+      return;
+    }
+    const normalizedAuthors = authors
+      .split(/[,，;；\n]+/)
+      .map((author) => author.trim())
+      .filter(Boolean);
+
+    setSaving(true);
+    setError(null);
+    try {
+      await onSave({ title: normalizedTitle, authors: normalizedAuthors, year: normalizedYear });
+      onClose();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : '论文信息保存失败。');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return <div className="dialog-backdrop">
+    <form className="dialog" role="dialog" aria-modal="true" aria-labelledby="paper-metadata-dialog-title" onSubmit={(event) => void submit(event)}>
+      <header className="dialog__header">
+        <div><h2 id="paper-metadata-dialog-title">编辑论文信息</h2><p>用于文献库检索、Reader 标识和 Markdown 导出；PDF 文件本身不会改变。</p></div>
+        <Button variant="ghost" className="icon-button" aria-label="关闭论文信息编辑" disabled={saving} onClick={onClose}><X size={18} /></Button>
+      </header>
+      <div className="dialog__body">
+        <div className="field-grid">
+          <label className="field-full" htmlFor="paper-metadata-title"><span>标题</span><input id="paper-metadata-title" value={title} onChange={(event) => setTitle(event.target.value)} autoFocus /></label>
+          <label className="field-full" htmlFor="paper-metadata-authors"><span>作者</span><input id="paper-metadata-authors" aria-label="作者" value={authors} onChange={(event) => setAuthors(event.target.value)} placeholder="多位作者用逗号分隔" aria-describedby="paper-metadata-authors-help" /><small id="paper-metadata-authors-help">可用逗号、分号或换行分隔多位作者。</small></label>
+          <label htmlFor="paper-metadata-year"><span>年份</span><input id="paper-metadata-year" value={year} onChange={(event) => setYear(event.target.value)} inputMode="numeric" placeholder="例如 2026" /></label>
+        </div>
+        {error ? <p className="dialog__form-error" role="alert">{error}</p> : null}
+      </div>
+      <footer className="dialog__footer">
+        <Button variant="secondary" disabled={saving} onClick={onClose}>取消</Button>
+        <Button type="submit" variant="primary" disabled={saving}>{saving ? '正在保存…' : '保存论文信息'}</Button>
+      </footer>
+    </form>
   </div>;
 }
 

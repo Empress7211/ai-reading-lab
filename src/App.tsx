@@ -23,7 +23,11 @@ import { LibraryPage } from './features/library/LibraryPage';
 import type { LocalPdfAnchor } from './features/LocalPdfViewer';
 import { ReaderEmptyState, ReaderPage, type PersistedReviewEntry } from './features/reader/ReaderPage';
 import { SettingsPage } from './features/settings/SettingsPage';
-import { createWorkspaceRepository, type WorkspaceSnapshot } from './services';
+import {
+  createWorkspaceRepository,
+  type UpdatePaperMetadataInput,
+  type WorkspaceSnapshot,
+} from './services';
 
 interface LocalDocument {
   paper: Paper;
@@ -210,6 +214,16 @@ export default function App() {
     });
   };
 
+  const updatePaperMetadata = async (input: UpdatePaperMetadataInput) => {
+    const current = localDocument;
+    if (!current || current.paper.id !== input.paperId) {
+      throw new Error('没有可更新的本地论文。');
+    }
+    await repository.updatePaperMetadata(input);
+    await refreshOpenDocument(current.paper.id);
+    pushToast('论文信息已更新', '标题、作者与年份已保存到当前本地工作区。');
+  };
+
   const createManualDraft = async (anchorId: string, claimText: string, relation: EvidenceRelation) => {
     const current = localDocument;
     if (!current?.paper.currentVersionId) throw new Error('没有可用的本地论文版本。');
@@ -382,6 +396,7 @@ export default function App() {
       nativeFileDialog={repository.runtime === 'tauri'}
       persistenceLabel={persistenceLabel}
       onImportPdf={(file) => void importLocalPdf(file)}
+      onUpdatePaperMetadata={(metadata) => updatePaperMetadata({ paperId: localDocument.paper.id, ...metadata })}
       onAnchorCreate={saveLocalAnchor}
       onCreateManualDraft={createManualDraft}
       onRequestAiDraft={requestAiDrafts}

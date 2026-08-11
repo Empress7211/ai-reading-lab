@@ -18,6 +18,7 @@ import {
   type ImportedPdf,
   type OpenAiCredentialStatus,
   type ReviewDraftInput,
+  type UpdatePaperMetadataInput,
   type WorkspaceRepository,
   type WorkspaceSeed,
   type WorkspaceSettings,
@@ -240,6 +241,33 @@ export class BrowserWorkspaceRepository implements WorkspaceRepository {
 
   loadPdfBytes(paperId: string): Promise<ArrayBuffer | null> {
     return this.#store.loadPdf(paperId);
+  }
+
+  async updatePaperMetadata(input: UpdatePaperMetadataInput): Promise<Paper> {
+    const title = input.title.trim();
+    if (!title) throw new Error('论文标题不能为空。');
+    if (input.authors.some((author) => !author.trim())) {
+      throw new Error('作者列表不能包含空名称。');
+    }
+    if (input.year !== null && (!Number.isInteger(input.year) || input.year < 1000 || input.year > 9999)) {
+      throw new Error('论文年份必须是四位整数。');
+    }
+
+    let updated: Paper | null = null;
+    await this.#update((state) => {
+      const paper = state.papers.find((candidate) => candidate.id === input.paperId);
+      if (!paper) throw new Error(`本地工作区中不存在论文 ${input.paperId}。`);
+      updated = {
+        ...paper,
+        title,
+        authors: input.authors.map((author) => author.trim()),
+        year: input.year,
+        updatedAt: new Date().toISOString(),
+      };
+      return { ...state, papers: upsert(state.papers, updated) };
+    });
+    if (!updated) throw new Error('论文元数据更新失败。');
+    return clone(updated);
   }
 
   async saveAnchor(anchor: EvidenceAnchor): Promise<EvidenceAnchor> {

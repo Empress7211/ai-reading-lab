@@ -12,6 +12,7 @@ describe('Tauri command allowlist', () => {
       'workspace_snapshot',
       'import_local_pdf',
       'load_pdf_bytes',
+      'update_paper_metadata',
       'save_anchor',
       'save_draft_bundle',
       'review_draft',

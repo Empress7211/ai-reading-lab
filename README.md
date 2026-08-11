@@ -7,6 +7,7 @@ Status: **v0.1 unsigned macOS release candidate**. The complete offline workflow
 ## What works now
 
 - Import a real local PDF.
+- Edit its local title, authors, and year for search and export.
 - Render it with PDF.js.
 - Create an Evidence Anchor from selected text and return to its PDF location.
 - Persist PDFs in a local content-addressed vault and entities in SQLite in Tauri.

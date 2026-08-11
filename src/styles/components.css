@@ -72,6 +72,7 @@
 .dialog__header p { margin-top: 4px; color: var(--pw-muted); font-size: 12px; }
 .dialog__body { padding: 17px 19px; }
 .dialog__footer { display: flex; justify-content: flex-end; gap: 8px; padding: 13px 19px; border-top: 1px solid var(--pw-line); }
+.dialog__form-error { margin-top: 12px; padding: 9px 10px; border-radius: 7px; background: var(--pw-danger-soft); color: var(--pw-danger); font-size: 11px; }
 
 .toast-region { position: fixed; z-index: 120; right: 18px; bottom: 18px; display: grid; width: min(380px, calc(100vw - 30px)); gap: 8px; pointer-events: none; }
 .toast { display: grid; grid-template-columns: 24px minmax(0, 1fr); gap: 9px; padding: 12px; border: 1px solid var(--pw-line); border-radius: 11px; background: var(--pw-surface); box-shadow: var(--pw-shadow-md); animation: toast-in 220ms ease; }

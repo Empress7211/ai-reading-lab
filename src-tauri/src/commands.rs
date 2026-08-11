@@ -41,6 +41,15 @@ pub struct DraftBundleInput {
     pub evidence_links: Vec<Value>,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdatePaperMetadataInput {
+    pub paper_id: String,
+    pub title: String,
+    pub authors: Vec<String>,
+    pub year: Option<i32>,
+}
+
 fn required_string<'a>(value: &'a Value, key: &str) -> Result<&'a str, AppError> {
     value
         .get(key)
@@ -278,6 +287,78 @@ pub fn load_pdf_bytes(state: State<'_, AppState>, paper_id: String) -> Result<Ve
         ));
     }
     Ok(fs::read(canonical_file)?)
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub fn update_paper_metadata(
+    state: State<'_, AppState>,
+    input: UpdatePaperMetadataInput,
+) -> Result<Value, AppError> {
+    update_paper_metadata_inner(&state, input)
+}
+
+fn update_paper_metadata_inner(
+    state: &AppState,
+    input: UpdatePaperMetadataInput,
+) -> Result<Value, AppError> {
+    let title = input.title.trim();
+    if title.is_empty() {
+        return Err(AppError::policy("PAPER_TITLE_REQUIRED", "论文标题不能为空"));
+    }
+    if input.authors.iter().any(|author| author.trim().is_empty()) {
+        return Err(AppError::policy(
+            "PAPER_AUTHOR_INVALID",
+            "作者列表不能包含空名称",
+        ));
+    }
+    if input
+        .year
+        .is_some_and(|year| !(1000..=9999).contains(&year))
+    {
+        return Err(AppError::policy(
+            "PAPER_YEAR_INVALID",
+            "论文年份必须是四位整数",
+        ));
+    }
+
+    let mut connection = storage::connect(state)?;
+    let mut paper = storage::get_json(&connection, "paper", &input.paper_id)?.ok_or_else(|| {
+        AppError::policy(
+            "PAPER_NOT_FOUND",
+            format!("本地工作区中不存在论文 {}", input.paper_id),
+        )
+    })?;
+    let object = paper
+        .as_object_mut()
+        .ok_or_else(|| AppError::policy("PAPER_RECORD_INVALID", "论文记录格式无效"))?;
+    object.insert("title".to_owned(), Value::String(title.to_owned()));
+    object.insert(
+        "authors".to_owned(),
+        Value::Array(
+            input
+                .authors
+                .iter()
+                .map(|author| Value::String(author.trim().to_owned()))
+                .collect(),
+        ),
+    );
+    object.insert("year".to_owned(), json!(input.year));
+    object.insert(
+        "updatedAt".to_owned(),
+        Value::String(chrono::Utc::now().to_rfc3339()),
+    );
+
+    let transaction = connection.transaction()?;
+    storage::upsert_json(&transaction, "paper", &input.paper_id, &paper)?;
+    storage::audit(
+        &transaction,
+        "PaperMetadataChanged",
+        "paper",
+        &input.paper_id,
+        &json!({"fields": ["title", "authors", "year"]}),
+    )?;
+    transaction.commit()?;
+    Ok(paper)
 }
 
 #[tauri::command(rename_all = "camelCase")]
@@ -691,8 +772,8 @@ mod tests {
     use std::fs;
 
     use super::{
-        contains_secret, required_string, review_draft_inner, validate_anchor_value,
-        ReviewDraftInput,
+        contains_secret, required_string, review_draft_inner, update_paper_metadata_inner,
+        validate_anchor_value, ReviewDraftInput, UpdatePaperMetadataInput,
     };
     use crate::storage::{self, AppState};
     use serde_json::json;
@@ -753,6 +834,45 @@ mod tests {
         corrupt["bboxNorm"] = json!([0.8, 0.2, 0.1, 0.3]);
         corrupt["textHash"] = json!("not-a-hash");
         assert!(validate_anchor_value(&corrupt).is_err());
+    }
+
+    #[test]
+    fn paper_metadata_update_preserves_the_existing_record() {
+        let state = test_state();
+        let connection = storage::connect(&state).unwrap();
+        storage::insert_json(
+            &connection,
+            "paper",
+            "paper-1",
+            &json!({
+                "id": "paper-1",
+                "currentVersionId": "version-1",
+                "title": "Imported file name",
+                "authors": [],
+                "year": null,
+                "versions": [{"id": "version-1"}],
+                "updatedAt": "2026-08-05T00:00:00.000Z"
+            }),
+        )
+        .unwrap();
+        drop(connection);
+
+        let updated = update_paper_metadata_inner(
+            &state,
+            UpdatePaperMetadataInput {
+                paper_id: "paper-1".to_owned(),
+                title: "  Evidence-led Reading  ".to_owned(),
+                authors: vec!["Ada Lovelace".to_owned(), "Alan Turing".to_owned()],
+                year: Some(2025),
+            },
+        )
+        .unwrap();
+
+        assert_eq!(updated["title"], "Evidence-led Reading");
+        assert_eq!(updated["authors"], json!(["Ada Lovelace", "Alan Turing"]));
+        assert_eq!(updated["year"], 2025);
+        assert_eq!(updated["versions"], json!([{"id": "version-1"}]));
+        remove_test_state(&state);
     }
 
     #[test]
