@@ -1,7 +1,9 @@
 import type {
   DraftProposal,
   EvidenceAnchor,
+  EvidenceLink,
   Job,
+  JudgmentNote,
   NoteBlock,
   Paper,
   Proposition,
@@ -14,17 +16,19 @@ import type {
 
 /** Serializable snapshot for an IndexedDB/OPFS browser adapter. */
 export interface BrowserRepositorySnapshotDTO {
-  readonly schemaVersion: 1;
+  readonly schemaVersion: 2;
   readonly workspaceId: UUID;
   readonly revision: number;
   readonly updatedAt: string;
   readonly papers: readonly Paper[];
   readonly readingPacks: readonly ReadingPack[];
   readonly evidenceAnchors: readonly EvidenceAnchor[];
+  readonly evidenceLinks: readonly EvidenceLink[];
   readonly draftProposals: readonly DraftProposal[];
   readonly reviewActions: readonly ReviewAction[];
   readonly verifiedClaims: readonly VerifiedClaim[];
   readonly noteBlocks: readonly NoteBlock[];
+  readonly judgments: readonly JudgmentNote[];
   readonly propositions: readonly Proposition[];
   readonly jobs: readonly Job[];
   readonly syncPlans: readonly SyncPlan[];

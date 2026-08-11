@@ -65,7 +65,7 @@ export function LibraryPage({
       <section className="metric-grid" aria-label="本地工作区概览">
         <article><span>本地论文</span><strong>{papers.length}</strong><small>来自当前 workspace</small></article>
         <article><span>Evidence Anchor</span><strong>{anchorCount}</strong><small>均可回到原始 PDF</small></article>
-        <article><span>待审阅 Draft</span><strong>{draftCount}</strong><small>显式 fixture，不是 AI 输出</small></article>
+        <article><span>待审阅 Draft</span><strong>{draftCount}</strong><small>人工或未来 AI 提案</small></article>
         <article><span>Verified Claim</span><strong>{verifiedCount}</strong><small>经过人工接受或编辑</small></article>
       </section>
       <section className="table-shell" aria-label="本地论文列表">

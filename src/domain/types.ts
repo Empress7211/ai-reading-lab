@@ -89,18 +89,27 @@ export const EVIDENCE_SUPPORT_TYPES = [
 
 export type EvidenceSupportType = (typeof EVIDENCE_SUPPORT_TYPES)[number];
 
-export interface ClaimEvidence {
+export const EVIDENCE_RELATIONS = ["support", "counter", "qualify", "context"] as const;
+
+export type EvidenceRelation = (typeof EVIDENCE_RELATIONS)[number];
+
+/** Immutable relationship between a Claim and a deterministic PDF Anchor. */
+export interface EvidenceLink {
+  readonly id: UUID;
+  readonly claimId: UUID;
   readonly anchorId: UUID;
+  readonly relation: EvidenceRelation;
   readonly supportType: EvidenceSupportType;
   readonly quotedFragment: string | null;
-  readonly notes: string | null;
+  readonly note: string | null;
+  readonly ordinal: number;
 }
 
 export interface AiDraftSnapshot {
   readonly claimText: string;
   readonly claimType: ClaimType;
   readonly epistemicSource: EpistemicSource;
-  readonly evidence: readonly ClaimEvidence[];
+  readonly evidenceLinkIds: readonly UUID[];
   readonly assumptions: readonly string[];
   readonly scopeConditions: readonly string[];
   readonly limitations: readonly string[];
@@ -121,7 +130,7 @@ export interface Claim {
   readonly claimText: string;
   readonly claimType: ClaimType;
   readonly epistemicSource: EpistemicSource;
-  readonly evidence: readonly ClaimEvidence[];
+  readonly evidenceLinkIds: readonly UUID[];
   readonly assumptions: readonly string[];
   readonly scopeConditions: readonly string[];
   readonly limitations: readonly string[];
@@ -144,7 +153,6 @@ export type ClaimEditableField =
   | "claimText"
   | "claimType"
   | "epistemicSource"
-  | "evidence"
   | "assumptions"
   | "scopeConditions"
   | "limitations"
@@ -157,7 +165,6 @@ export interface ClaimPatch {
   readonly claimText?: string;
   readonly claimType?: ClaimType;
   readonly epistemicSource?: EpistemicSource;
-  readonly evidence?: readonly ClaimEvidence[];
   readonly assumptions?: readonly string[];
   readonly scopeConditions?: readonly string[];
   readonly limitations?: readonly string[];
@@ -203,6 +210,7 @@ export interface ReviewContext {
   readonly actorId: string;
   readonly occurredAt: string;
   readonly anchors: ReadonlyMap<UUID, EvidenceAnchor>;
+  readonly evidenceLinks: ReadonlyMap<UUID, EvidenceLink>;
 }
 
 export interface ReviewTransitionResult {
@@ -223,6 +231,10 @@ export type ClaimValidationIssueCode =
   | "CLAIM_CONFIDENCE_INVALID"
   | "CLAIM_EMPTY"
   | "CLAIM_EVIDENCE_DUPLICATE"
+  | "EVIDENCE_LINK_NOT_FOUND"
+  | "EVIDENCE_LINK_CLAIM_MISMATCH"
+  | "EVIDENCE_LINK_RELATION_INVALID"
+  | "EVIDENCE_LINK_ORDINAL_INVALID"
   | "CLAIM_TYPE_INVALID"
   | "DIRECT_QUOTE_FRAGMENT_REQUIRED"
   | "EPISTEMIC_SOURCE_INVALID"
@@ -266,12 +278,13 @@ export interface PaperMarkdownExport {
   readonly identifiers: readonly PaperIdentifier[];
   readonly claims: readonly Claim[];
   readonly anchors: ReadonlyMap<UUID, EvidenceAnchor>;
+  readonly evidenceLinks: ReadonlyMap<UUID, EvidenceLink>;
 }
 
-/** An AI proposal has a type-level guarantee that it has not been reviewed. */
+/** A reviewable proposal created manually or by the later AI adapter. */
 export interface DraftProposal extends Omit<Claim, "reviewStatus" | "createdBy" | "reviewedBy" | "reviewedAt" | "originalAiDraft"> {
   readonly reviewStatus: "draft";
-  readonly createdBy: "ai";
+  readonly createdBy: ClaimCreator;
   readonly reviewedBy: null;
   readonly reviewedAt: null;
   readonly originalAiDraft: null;
@@ -399,12 +412,40 @@ export interface NoteBlock {
   readonly noteType: "summary" | "method" | "limitation" | "question" | "action_item" | "reproduction" | "definition";
   readonly title: string | null;
   readonly content: string;
-  readonly evidence: readonly ClaimEvidence[];
+  readonly evidenceLinkIds: readonly UUID[];
   readonly reviewStatus: ReviewStatus;
   readonly createdBy: ClaimCreator;
   readonly originalAiContent: string | null;
   readonly reviewedBy: string | null;
   readonly reviewedAt: string | null;
+}
+
+export const JUDGMENT_SECTION_KEYS = [
+  "judgment",
+  "reasoning",
+  "supportingEvidence",
+  "counterEvidence",
+  "uncertainties",
+  "nextValidation",
+] as const;
+
+export type JudgmentSectionKey = (typeof JUDGMENT_SECTION_KEYS)[number];
+
+export interface JudgmentSection {
+  readonly text: string;
+  readonly verifiedClaimIds: readonly UUID[];
+}
+
+/** User-owned output. AI may create Draft Claims but cannot write this entity. */
+export interface JudgmentNote {
+  readonly id: UUID;
+  readonly paperId: UUID;
+  readonly paperVersionId: UUID;
+  readonly sections: Readonly<Record<JudgmentSectionKey, JudgmentSection>>;
+  readonly status: "draft" | "complete";
+  readonly createdBy: "user";
+  readonly updatedAt: string;
+  readonly completedAt: string | null;
 }
 
 export type ClaimRelationshipType =

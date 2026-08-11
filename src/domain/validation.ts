@@ -1,6 +1,7 @@
 import {
   ANCHOR_TYPES,
   CLAIM_TYPES,
+  EVIDENCE_RELATIONS,
   EPISTEMIC_SOURCES,
   type Claim,
   type ClaimValidationIssue,
@@ -8,12 +9,13 @@ import {
   type ClaimValidationPolicy,
   type ClaimValidationResult,
   type EvidenceAnchor,
+  type EvidenceLink,
   type UUID,
 } from "./types";
 
 export const DEFAULT_CLAIM_VALIDATION_POLICY: ClaimValidationPolicy = {
   requireEvidenceForFactualClaims: true,
-  requireExistingAnchorsForAiClaims: false,
+  requireExistingAnchorsForAiClaims: true,
   rejectOrphanedAnchors: true,
   requireSamePaperVersion: true,
   requireAiInferenceAttention: true,
@@ -109,6 +111,7 @@ export function validateAnchor(anchor: EvidenceAnchor): ClaimValidationResult {
 export function validateClaim(
   claim: Claim,
   anchors: ReadonlyMap<UUID, EvidenceAnchor>,
+  evidenceLinks: ReadonlyMap<UUID, EvidenceLink>,
   policy: ClaimValidationPolicy = DEFAULT_CLAIM_VALIDATION_POLICY,
 ): ClaimValidationResult {
   const issues: ClaimValidationIssue[] = [];
@@ -151,7 +154,7 @@ export function validateClaim(
 
   const factualEvidenceRequired = policy.requireEvidenceForFactualClaims && isFactualClaim(claim);
   const aiEvidenceRequired = policy.requireExistingAnchorsForAiClaims && claim.createdBy === "ai";
-  if ((factualEvidenceRequired || aiEvidenceRequired) && claim.evidence.length === 0) {
+  if ((factualEvidenceRequired || aiEvidenceRequired) && claim.evidenceLinkIds.length === 0) {
     issues.push(
       issue(
         "EVIDENCE_REQUIRED",
@@ -176,20 +179,37 @@ export function validateClaim(
     );
   }
 
-  const seenAnchorIds = new Set<UUID>();
-  claim.evidence.forEach((evidence, index) => {
-    const path = `evidence.${index}`;
-    if (seenAnchorIds.has(evidence.anchorId)) {
+  const seenLinkIds = new Set<UUID>();
+  const resolvedLinks: EvidenceLink[] = [];
+  claim.evidenceLinkIds.forEach((linkId, index) => {
+    const path = `evidenceLinkIds.${index}`;
+    if (seenLinkIds.has(linkId)) {
       issues.push(
         issue(
           "CLAIM_EVIDENCE_DUPLICATE",
-          `${path}.anchorId`,
-          "A Claim cannot cite the same Anchor more than once.",
+          path,
+          "A Claim cannot cite the same EvidenceLink more than once.",
         ),
       );
       return;
     }
-    seenAnchorIds.add(evidence.anchorId);
+    seenLinkIds.add(linkId);
+
+    const evidence = evidenceLinks.get(linkId);
+    if (!evidence) {
+      issues.push(issue("EVIDENCE_LINK_NOT_FOUND", path, `EvidenceLink ${linkId} does not exist.`));
+      return;
+    }
+    resolvedLinks.push(evidence);
+    if (evidence.claimId !== claim.id) {
+      issues.push(issue("EVIDENCE_LINK_CLAIM_MISMATCH", path, "EvidenceLink belongs to another Claim."));
+    }
+    if (!EVIDENCE_RELATIONS.includes(evidence.relation)) {
+      issues.push(issue("EVIDENCE_LINK_RELATION_INVALID", path, "EvidenceLink relation is invalid."));
+    }
+    if (!Number.isInteger(evidence.ordinal) || evidence.ordinal < 0) {
+      issues.push(issue("EVIDENCE_LINK_ORDINAL_INVALID", path, "EvidenceLink ordinal must be a non-negative integer."));
+    }
 
     const anchor = anchors.get(evidence.anchorId);
     if (!anchor) {
@@ -248,7 +268,7 @@ export function validateClaim(
 
   if (
     claim.epistemicSource === "direct_quote" &&
-    !claim.evidence.some((evidence) => evidence.quotedFragment?.trim())
+    !resolvedLinks.some((evidence) => evidence.quotedFragment?.trim())
   ) {
     issues.push(
       issue(
@@ -262,7 +282,7 @@ export function validateClaim(
   if (
     policy.requireReportedResultSupport &&
     claim.epistemicSource === "reported_result" &&
-    !claim.evidence.some((evidence) => REPORTED_RESULT_SUPPORT.has(evidence.supportType))
+    !resolvedLinks.some((evidence) => REPORTED_RESULT_SUPPORT.has(evidence.supportType))
   ) {
     issues.push(
       issue(
@@ -279,9 +299,10 @@ export function validateClaim(
 export function assertValidClaim(
   claim: Claim,
   anchors: ReadonlyMap<UUID, EvidenceAnchor>,
+  evidenceLinks: ReadonlyMap<UUID, EvidenceLink>,
   policy: ClaimValidationPolicy = DEFAULT_CLAIM_VALIDATION_POLICY,
 ): void {
-  const result = validateClaim(claim, anchors, policy);
+  const result = validateClaim(claim, anchors, evidenceLinks, policy);
   if (!result.valid) {
     throw new ClaimValidationError(result.issues);
   }

@@ -23,5 +23,19 @@ describe('TauriWorkspaceRepository', () => {
     ).rejects.toThrow('native file dialog');
     expect(invoke).not.toHaveBeenCalled();
   });
-});
 
+  it('updates paper metadata through the native repository command', async () => {
+    const updated = {
+      id: 'paper-1',
+      title: 'Updated paper',
+      authors: ['Local Author'],
+      year: 2025,
+    };
+    const invoke = vi.fn().mockResolvedValue(updated);
+    const repository = new TauriWorkspaceRepository(invoke);
+    const input = { paperId: 'paper-1', title: 'Updated paper', authors: ['Local Author'], year: 2025 };
+
+    await expect(repository.updatePaperMetadata(input)).resolves.toEqual(updated);
+    expect(invoke).toHaveBeenCalledWith('update_paper_metadata', { input });
+  });
+});
