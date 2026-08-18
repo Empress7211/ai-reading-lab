@@ -11,7 +11,9 @@ import type {
   GenerateDraftsResult,
   ImportPdfInput,
   ImportedPdf,
+  ListOpenAiModelsInput,
   OpenAiCredentialStatus,
+  OpenAiModel,
   ReviewDraftInput,
   UpdatePaperMetadataInput,
   WorkspaceRepository,
@@ -19,6 +21,17 @@ import type {
   WorkspaceSettings,
   WorkspaceSnapshot,
 } from './types';
+import { DEFAULT_WORKSPACE_SETTINGS } from './types';
+
+function normalizeSnapshot(snapshot: WorkspaceSnapshot): WorkspaceSnapshot {
+  return {
+    ...snapshot,
+    settings: {
+      ...DEFAULT_WORKSPACE_SETTINGS,
+      ...snapshot.settings,
+    },
+  };
+}
 
 function normalizePdfBytes(
   payload: ArrayBuffer | Uint8Array | number[] | null,
@@ -47,12 +60,16 @@ export class TauriWorkspaceRepository implements WorkspaceRepository {
     this.#invoke = createAllowlistedInvoke(invoke);
   }
 
-  initialize(seed: WorkspaceSeed = {}): Promise<WorkspaceSnapshot> {
-    return this.#invoke<WorkspaceSnapshot>(TAURI_COMMANDS.initializeWorkspace, { seed });
+  async initialize(seed: WorkspaceSeed = {}): Promise<WorkspaceSnapshot> {
+    return normalizeSnapshot(
+      await this.#invoke<WorkspaceSnapshot>(TAURI_COMMANDS.initializeWorkspace, { seed }),
+    );
   }
 
-  snapshot(): Promise<WorkspaceSnapshot> {
-    return this.#invoke<WorkspaceSnapshot>(TAURI_COMMANDS.getWorkspaceSnapshot);
+  async snapshot(): Promise<WorkspaceSnapshot> {
+    return normalizeSnapshot(
+      await this.#invoke<WorkspaceSnapshot>(TAURI_COMMANDS.getWorkspaceSnapshot),
+    );
   }
 
   async importPdf(input: ImportPdfInput): Promise<ImportedPdf> {
@@ -113,6 +130,10 @@ export class TauriWorkspaceRepository implements WorkspaceRepository {
 
   deleteOpenAiApiKey(): Promise<OpenAiCredentialStatus> {
     return this.#invoke<OpenAiCredentialStatus>(TAURI_COMMANDS.deleteOpenAiApiKey);
+  }
+
+  listOpenAiModels(input: ListOpenAiModelsInput): Promise<OpenAiModel[]> {
+    return this.#invoke<OpenAiModel[]>(TAURI_COMMANDS.listOpenAiModels, { input });
   }
 
   generateDrafts(input: GenerateDraftsInput): Promise<GenerateDraftsResult> {

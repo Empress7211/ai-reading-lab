@@ -140,7 +140,7 @@ describe('BrowserWorkspaceRepository', () => {
     await expect(repository.saveJudgment(invalid)).rejects.toThrow('核心判断');
   });
 
-  it('fails explicitly when the deferred OpenAI adapter is requested', async () => {
+  it('fails explicitly when the native-only OpenAI adapter is requested in a browser', async () => {
     const repository = new BrowserWorkspaceRepository({ store: new MemoryStore() });
     await expect(repository.generateDrafts({ paperId: 'paper-1', anchorIds: ['anchor-1'] })).rejects.toThrow('不会保存密钥或伪造结果');
   });

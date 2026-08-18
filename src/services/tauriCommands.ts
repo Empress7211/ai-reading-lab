@@ -12,6 +12,7 @@ export const TAURI_COMMANDS = {
   openAiCredentialStatus: 'open_ai_credential_status',
   saveOpenAiApiKey: 'save_open_ai_api_key',
   deleteOpenAiApiKey: 'delete_open_ai_api_key',
+  listOpenAiModels: 'list_open_ai_models',
   generateDrafts: 'generate_drafts',
 } as const;
 

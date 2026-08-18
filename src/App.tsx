@@ -24,6 +24,7 @@ import type { LocalPdfAnchor } from './features/LocalPdfViewer';
 import { ReaderEmptyState, ReaderPage, type PersistedReviewEntry } from './features/reader/ReaderPage';
 import { SettingsPage } from './features/settings/SettingsPage';
 import {
+  DEFAULT_WORKSPACE_SETTINGS,
   createWorkspaceRepository,
   type UpdatePaperMetadataInput,
   type WorkspaceSnapshot,
@@ -277,8 +278,9 @@ export default function App() {
   const requestAiDrafts = async (anchorId: string) => {
     const current = localDocument;
     if (!current) throw new Error('没有可用的本地论文。');
-    await repository.generateDrafts({ paperId: current.paper.id, anchorIds: [anchorId] });
+    const result = await repository.generateDrafts({ paperId: current.paper.id, anchorIds: [anchorId] });
     await refreshOpenDocument(current.paper.id);
+    pushToast('AI Draft 已生成', `${result.bundles.length} 条 Draft 已进入人工审阅队列。`);
   };
 
   const reviewLocalDraft = async (draftId: string, decision: DraftReviewDecision) => {
@@ -374,7 +376,12 @@ export default function App() {
       onImportPdf={(file) => void importLocalPdf(file)}
     />;
   } else if (view === 'settings') {
-    pageContent = <SettingsPage runtimeLabel={runtimeLabel} />;
+    pageContent = <SettingsPage
+      runtimeLabel={runtimeLabel}
+      repository={repository}
+      settings={workspaceSnapshot?.settings ?? DEFAULT_WORKSPACE_SETTINGS}
+      onSettingsSaved={(settings) => setWorkspaceSnapshot((current) => current ? { ...current, settings } : current)}
+    />;
   } else if (!localDocument) {
     pageContent = <ReaderEmptyState
       nativeFileDialog={repository.runtime === 'tauri'}

@@ -2,6 +2,21 @@ import { describe, expect, it, vi } from 'vitest';
 import { TauriWorkspaceRepository } from '../tauriWorkspaceRepository';
 
 describe('TauriWorkspaceRepository', () => {
+  it('fills model settings defaults when opening an older native workspace snapshot', async () => {
+    const invoke = vi.fn().mockResolvedValue({
+      papers: [], anchors: [], evidenceLinks: [], drafts: [], reviewActions: [],
+      verifiedClaims: [], userNotes: [], judgments: [],
+      settings: { cloudMetadataEnabled: false },
+    });
+    const repository = new TauriWorkspaceRepository(invoke);
+
+    const snapshot = await repository.snapshot();
+
+    expect(snapshot.settings.openAiBaseUrl).toBe('https://api.openai.com/v1');
+    expect(snapshot.settings.openAiModel).toBe('');
+    expect(snapshot.settings.openAiCredentialRef).toBeNull();
+  });
+
   it('loads PDF bytes by paper id without accepting a path', async () => {
     const invoke = vi.fn().mockResolvedValue([37, 80, 68, 70]);
     const repository = new TauriWorkspaceRepository(invoke);
@@ -37,5 +52,22 @@ describe('TauriWorkspaceRepository', () => {
 
     await expect(repository.updatePaperMetadata(input)).resolves.toEqual(updated);
     expect(invoke).toHaveBeenCalledWith('update_paper_metadata', { input });
+  });
+
+  it('loads models through the allowlisted native command without persisting a temporary key', async () => {
+    const models = [{ id: 'model-a', ownedBy: 'provider' }];
+    const invoke = vi.fn().mockResolvedValue(models);
+    const repository = new TauriWorkspaceRepository(invoke);
+
+    await expect(repository.listOpenAiModels({
+      baseUrl: 'https://provider.example/v1',
+      apiKey: 'temporary-test-key',
+    })).resolves.toEqual(models);
+    expect(invoke).toHaveBeenCalledWith('list_open_ai_models', {
+      input: {
+        baseUrl: 'https://provider.example/v1',
+        apiKey: 'temporary-test-key',
+      },
+    });
   });
 });

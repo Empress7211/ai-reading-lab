@@ -399,7 +399,7 @@ function LocalAnchorPanel({ anchors, stateForAnchor, onJump, onCreateManualDraft
         <label><span>与证据关系</span><select value={relation} onChange={(event) => setRelation(event.target.value as EvidenceRelation)}><option value="support">支持</option><option value="counter">反证</option><option value="qualify">限定</option><option value="context">上下文</option></select></label>
         <div><Button size="small" variant="primary" disabled={pending} onClick={() => void submit(anchor.id)}>保存为待审阅 Draft</Button><Button size="small" disabled={pending} onClick={() => setEditingAnchorId(null)}>取消</Button></div>
       </div> : null}
-      <Button size="small" variant="secondary" className="full-width" icon={<Sparkles size={14} />} disabled={pending} onClick={() => void requestAi(anchor.id)}>请求 AI Draft（接口保留）</Button>
+      <Button size="small" variant="secondary" className="full-width" icon={<Sparkles size={14} />} disabled={pending} onClick={() => void requestAi(anchor.id)}>生成 AI Draft</Button>
     </section>)}
     {error ? <p className="inline-error" role="alert">{error}</p> : null}
   </>;
@@ -411,7 +411,7 @@ function PersistedLedgerPanel({ entries, anchors, onJump, onReview }: { entries:
   return <>
     <PanelIntro eyebrow="Human Review Gate" title="Draft、ReviewAction 与 Verified 分层保存。">人工或 AI Draft 都不能直接进入最终知识；必须逐条接受、编辑或驳回。</PanelIntro>
     <div className="review-summary"><span><strong>{verified} Verified · {rejected} Rejected</strong><small>{entries.length - verified - rejected} 条待审阅</small></span><strong>{Math.round((verified / Math.max(entries.length, 1)) * 100)}%</strong></div>
-    {entries.length === 0 ? <p className="chat-empty">先创建 Evidence Anchor，再写一条人工 Draft；AI 接口未配置不会阻塞人工流程。</p> : null}
+    {entries.length === 0 ? <p className="chat-empty">先创建 Evidence Anchor，再写人工 Draft，或使用已配置模型生成待审阅 Draft。</p> : null}
     {entries.map((entry) => <PersistedClaimCard key={entry.draft.id} entry={entry} anchors={anchors} onJump={onJump} onReview={onReview} />)}
   </>;
 }
@@ -466,7 +466,7 @@ function PersistedClaimCard({ entry, anchors, onJump, onReview }: { entry: Persi
 function GuidePanel({ onChoose }: { onChoose: (tab: ReaderTab) => void }) {
   return <>
     <PanelIntro eyebrow="Evidence first · local only" title="从原文到自己的判断。">没有自动写入知识：原文先成为 Anchor，Claim 必须审核，最终判断始终由你完成。</PanelIntro>
-    <section className="guide-card"><header><MapPin size={17} /><h3>唯一工作流</h3></header><ol><li>在 PDF 中选择原文，创建可回跳 Anchor。</li><li>基于 Anchor 写人工 Draft；未来也可请求 AI Draft。</li><li>逐条接受、编辑或驳回，形成 Verified Claim。</li><li>在“我的判断”中引用 Verified Claim 并完成结论。</li></ol></section>
+    <section className="guide-card"><header><MapPin size={17} /><h3>唯一工作流</h3></header><ol><li>在 PDF 中选择原文，创建可回跳 Anchor。</li><li>基于 Anchor 写人工 Draft，或请求已配置模型生成 AI Draft。</li><li>逐条接受、编辑或驳回，形成 Verified Claim。</li><li>在“我的判断”中引用 Verified Claim 并完成结论。</li></ol></section>
     <Button variant="primary" className="full-width" onClick={() => onChoose('anchors')}>开始固定证据 <ChevronRight size={16} /></Button>
   </>;
 }

@@ -1,3 +1,4 @@
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io::Read;
 
@@ -8,6 +9,7 @@ use sha2::{Digest, Sha256};
 use tauri::State;
 
 use crate::error::AppError;
+use crate::openai::{self, CredentialStore, MacOsKeychainStore};
 use crate::storage::{self, AppState};
 
 const MAX_PDF_BYTES: u64 = 512 * 1024 * 1024;
@@ -34,7 +36,7 @@ pub struct ReviewDraftInput {
     pub verified_claim: Option<Value>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DraftBundleInput {
     pub draft: Value,
@@ -48,6 +50,20 @@ pub struct UpdatePaperMetadataInput {
     pub title: String,
     pub authors: Vec<String>,
     pub year: Option<i32>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ListOpenAiModelsInput {
+    pub base_url: String,
+    pub api_key: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GenerateDraftsInput {
+    pub paper_id: String,
+    pub anchor_ids: Vec<String>,
 }
 
 fn required_string<'a>(value: &'a Value, key: &str) -> Result<&'a str, AppError> {
@@ -376,6 +392,10 @@ pub fn save_draft_bundle(
     state: State<'_, AppState>,
     bundle: DraftBundleInput,
 ) -> Result<Value, AppError> {
+    save_draft_bundle_inner(&state, bundle)
+}
+
+fn save_draft_bundle_inner(state: &AppState, bundle: DraftBundleInput) -> Result<Value, AppError> {
     let draft = &bundle.draft;
     let id = required_string(draft, "id")?;
     required_string(draft, "paperId")?;
@@ -430,7 +450,7 @@ pub fn save_draft_bundle(
             "Draft 必须与 EvidenceLink 原子保存",
         ));
     }
-    let mut connection = storage::connect(&state)?;
+    let mut connection = storage::connect(state)?;
     let requested_ids: Vec<&str> = evidence_link_ids.iter().filter_map(Value::as_str).collect();
     if requested_ids.len() != evidence_link_ids.len()
         || requested_ids.len() != bundle.evidence_links.len()
@@ -686,30 +706,323 @@ pub fn save_judgment(state: State<'_, AppState>, judgment: Value) -> Result<Valu
     Ok(judgment)
 }
 
+fn credential_status_with(store: &dyn CredentialStore) -> Result<Value, AppError> {
+    let configured = store.load()?.is_some();
+    Ok(json!({
+        "configured": configured,
+        "credentialRef": if configured { Some(openai::CREDENTIAL_REF) } else { None }
+    }))
+}
+
+fn save_api_key_with(store: &dyn CredentialStore, api_key: &str) -> Result<Value, AppError> {
+    store.save(api_key)?;
+    credential_status_with(store)
+}
+
+fn delete_api_key_with(store: &dyn CredentialStore) -> Result<Value, AppError> {
+    store.delete()?;
+    credential_status_with(store)
+}
+
+fn request_api_key(
+    provided: Option<String>,
+    store: &dyn CredentialStore,
+) -> Result<String, AppError> {
+    match provided {
+        Some(value) if !value.trim().is_empty() => Ok(value.trim().to_owned()),
+        Some(_) => Err(AppError::policy(
+            "OPENAI_API_KEY_REQUIRED",
+            "API Key 不能为空",
+        )),
+        None => store.load()?.ok_or_else(|| {
+            AppError::policy(
+                "OPENAI_API_KEY_REQUIRED",
+                "尚未在 macOS Keychain 中配置 API Key",
+            )
+        }),
+    }
+}
+
 #[tauri::command]
-pub fn open_ai_credential_status() -> Value {
-    json!({"configured": false, "credentialRef": null})
+pub fn open_ai_credential_status() -> Result<Value, AppError> {
+    credential_status_with(&MacOsKeychainStore)
 }
 
 #[tauri::command(rename_all = "camelCase")]
-pub fn save_open_ai_api_key(_api_key: String) -> Result<Value, AppError> {
-    Err(AppError::policy(
-        "OPENAI_ADAPTER_DEFERRED",
-        "当前构建尚未接入 OpenAI Keychain 适配器；不会保存或回显密钥",
-    ))
+pub fn save_open_ai_api_key(api_key: String) -> Result<Value, AppError> {
+    save_api_key_with(&MacOsKeychainStore, &api_key)
 }
 
 #[tauri::command]
-pub fn delete_open_ai_api_key() -> Value {
-    json!({"configured": false, "credentialRef": null})
+pub fn delete_open_ai_api_key() -> Result<Value, AppError> {
+    delete_api_key_with(&MacOsKeychainStore)
 }
 
 #[tauri::command(rename_all = "camelCase")]
-pub fn generate_drafts(_input: Value) -> Result<Value, AppError> {
-    Err(AppError::policy(
-        "OPENAI_ADAPTER_DEFERRED",
-        "当前构建未配置 OpenAI Draft 适配器；Anchor 已保留，可继续创建人工 Draft",
-    ))
+pub async fn list_open_ai_models(
+    input: ListOpenAiModelsInput,
+) -> Result<Vec<openai::OpenAiModel>, AppError> {
+    let api_key = request_api_key(input.api_key, &MacOsKeychainStore)?;
+    openai::list_models(&input.base_url, &api_key).await
+}
+
+fn normalized_text_list(values: Vec<String>) -> Vec<String> {
+    values
+        .into_iter()
+        .map(|value| value.trim().to_owned())
+        .filter(|value| !value.is_empty())
+        .collect()
+}
+
+fn generated_bundle(
+    generated: openai::GeneratedDraft,
+    paper_id: &str,
+    paper_version_id: &str,
+    model_run_id: &str,
+    anchors: &HashMap<String, Value>,
+) -> Result<DraftBundleInput, AppError> {
+    let claim_text = generated.claim_text.trim();
+    if claim_text.chars().count() < 5 || claim_text.chars().count() > 1_500 {
+        return Err(AppError::policy(
+            "OPENAI_DRAFT_CLAIM_INVALID",
+            "模型返回的 claimText 必须包含 5 到 1500 个字符",
+        ));
+    }
+    if ![
+        "theoretical",
+        "empirical",
+        "methodological",
+        "descriptive",
+        "interpretive",
+        "normative",
+    ]
+    .contains(&generated.claim_type.as_str())
+    {
+        return Err(AppError::policy(
+            "OPENAI_DRAFT_CLAIM_TYPE_INVALID",
+            "模型返回了不支持的 claimType",
+        ));
+    }
+    if ![
+        "direct_quote",
+        "author_claim",
+        "reported_result",
+        "ai_inference",
+    ]
+    .contains(&generated.epistemic_source.as_str())
+    {
+        return Err(AppError::policy(
+            "OPENAI_DRAFT_EPISTEMIC_SOURCE_INVALID",
+            "模型返回了不支持的 epistemicSource，AI 不能创建用户判断",
+        ));
+    }
+    if !["support", "counter", "qualify", "context"].contains(&generated.relation.as_str()) {
+        return Err(AppError::policy(
+            "OPENAI_DRAFT_RELATION_INVALID",
+            "模型返回了不支持的 EvidenceLink relation",
+        ));
+    }
+    if ![
+        "direct_statement",
+        "reported_result",
+        "definition",
+        "method_description",
+        "limitation_statement",
+        "figure",
+        "table",
+        "equation",
+        "context",
+    ]
+    .contains(&generated.support_type.as_str())
+    {
+        return Err(AppError::policy(
+            "OPENAI_DRAFT_SUPPORT_TYPE_INVALID",
+            "模型返回了不支持的 EvidenceLink supportType",
+        ));
+    }
+    if generated.epistemic_source == "reported_result"
+        && !["reported_result", "figure", "table", "equation"]
+            .contains(&generated.support_type.as_str())
+    {
+        return Err(AppError::policy(
+            "OPENAI_REPORTED_RESULT_SUPPORT_INVALID",
+            "reported_result Draft 必须引用结果、图、表或公式证据",
+        ));
+    }
+    if !generated.confidence.is_finite() || !(0.0..=1.0).contains(&generated.confidence) {
+        return Err(AppError::policy(
+            "OPENAI_DRAFT_CONFIDENCE_INVALID",
+            "模型返回的 confidence 必须在 0 到 1 之间",
+        ));
+    }
+    if generated.epistemic_source == "ai_inference" && !generated.needs_human_attention {
+        return Err(AppError::policy(
+            "OPENAI_INFERENCE_REVIEW_REQUIRED",
+            "AI inference 必须明确标记 needsHumanAttention",
+        ));
+    }
+    if generated.anchor_ids.is_empty() {
+        return Err(AppError::policy(
+            "OPENAI_DRAFT_ANCHOR_REQUIRED",
+            "模型返回的每条 Draft 必须引用至少一个已选择 Anchor",
+        ));
+    }
+    let unique_anchor_ids: HashSet<&String> = generated.anchor_ids.iter().collect();
+    if unique_anchor_ids.len() != generated.anchor_ids.len()
+        || generated
+            .anchor_ids
+            .iter()
+            .any(|anchor_id| !anchors.contains_key(anchor_id))
+    {
+        return Err(AppError::policy(
+            "OPENAI_DRAFT_ANCHOR_INVALID",
+            "模型引用了重复、未知或未选择的 Anchor",
+        ));
+    }
+
+    let draft_id = uuid::Uuid::new_v4().to_string();
+    let mut evidence_link_ids = Vec::with_capacity(generated.anchor_ids.len());
+    let mut evidence_links = Vec::with_capacity(generated.anchor_ids.len());
+    for (ordinal, anchor_id) in generated.anchor_ids.iter().enumerate() {
+        let anchor = anchors.get(anchor_id).expect("validated Anchor lookup");
+        let link_id = uuid::Uuid::new_v4().to_string();
+        evidence_link_ids.push(link_id.clone());
+        evidence_links.push(json!({
+            "id": link_id,
+            "claimId": draft_id,
+            "anchorId": anchor_id,
+            "relation": generated.relation,
+            "supportType": generated.support_type,
+            "quotedFragment": required_string(anchor, "selectedText")?,
+            "note": null,
+            "ordinal": ordinal,
+        }));
+    }
+    let now = chrono::Utc::now().to_rfc3339();
+    let draft = json!({
+        "id": draft_id,
+        "paperId": paper_id,
+        "paperVersionId": paper_version_id,
+        "claimText": claim_text,
+        "claimType": generated.claim_type,
+        "epistemicSource": generated.epistemic_source,
+        "evidenceLinkIds": evidence_link_ids,
+        "assumptions": normalized_text_list(generated.assumptions),
+        "scopeConditions": normalized_text_list(generated.scope_conditions),
+        "limitations": normalized_text_list(generated.limitations),
+        "confidence": generated.confidence,
+        "confidenceBasis": normalized_text_list(generated.confidence_basis),
+        "reviewStatus": "draft",
+        "createdBy": "ai",
+        "needsHumanAttention": generated.needs_human_attention,
+        "modelRunId": model_run_id,
+        "userComment": null,
+        "version": 1,
+        "createdAt": now,
+        "updatedAt": now,
+        "reviewedBy": null,
+        "reviewedAt": null,
+        "originalAiDraft": null,
+    });
+    Ok(DraftBundleInput {
+        draft,
+        evidence_links,
+    })
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub async fn generate_drafts(
+    state: State<'_, AppState>,
+    input: GenerateDraftsInput,
+) -> Result<Value, AppError> {
+    if input.anchor_ids.is_empty() {
+        return Err(AppError::policy(
+            "OPENAI_ANCHOR_REQUIRED",
+            "生成 AI Draft 前必须选择至少一个 Evidence Anchor",
+        ));
+    }
+    let requested_anchor_ids: HashSet<&String> = input.anchor_ids.iter().collect();
+    if requested_anchor_ids.len() != input.anchor_ids.len() {
+        return Err(AppError::policy(
+            "OPENAI_ANCHOR_DUPLICATE",
+            "生成请求不能包含重复 Anchor",
+        ));
+    }
+
+    let (base_url, model, paper_version_id, anchors, context) = {
+        let connection = storage::connect(&state)?;
+        let settings =
+            storage::get_json(&connection, "settings", "workspace")?.ok_or_else(|| {
+                AppError::policy(
+                    "OPENAI_CONFIGURATION_REQUIRED",
+                    "请先在“设置 → 模型与 API”中保存 Base URL 与模型 ID",
+                )
+            })?;
+        let base_url = required_string(&settings, "openAiBaseUrl")?.to_owned();
+        let model = required_string(&settings, "openAiModel")?.to_owned();
+        let paper = storage::get_json(&connection, "paper", &input.paper_id)?.ok_or_else(|| {
+            AppError::policy(
+                "PAPER_NOT_FOUND",
+                format!("本地工作区中不存在论文 {}", input.paper_id),
+            )
+        })?;
+        let paper_version_id = required_string(&paper, "currentVersionId")?.to_owned();
+        let mut anchors = HashMap::new();
+        let mut generation_anchors = Vec::with_capacity(input.anchor_ids.len());
+        for anchor_id in &input.anchor_ids {
+            let anchor = storage::get_json(&connection, "anchor", anchor_id)?.ok_or_else(|| {
+                AppError::policy("ANCHOR_NOT_FOUND", format!("不存在 Anchor {anchor_id}"))
+            })?;
+            if required_string(&anchor, "paperVersionId")? != paper_version_id {
+                return Err(AppError::policy(
+                    "ANCHOR_PAPER_VERSION_MISMATCH",
+                    "AI Draft 只能引用当前论文版本的 Anchor",
+                ));
+            }
+            generation_anchors.push(openai::GenerationAnchor {
+                id: anchor_id.clone(),
+                page_index: anchor
+                    .get("pageIndex")
+                    .and_then(Value::as_i64)
+                    .ok_or_else(|| AppError::policy("ANCHOR_PAGE_INVALID", "Anchor 页码无效"))?,
+                selected_text: required_string(&anchor, "selectedText")?.to_owned(),
+            });
+            anchors.insert(anchor_id.clone(), anchor);
+        }
+        let context = openai::GenerationContext {
+            paper_title: required_string(&paper, "title")?.to_owned(),
+            anchors: generation_anchors,
+        };
+        (base_url, model, paper_version_id, anchors, context)
+    };
+
+    let api_key = request_api_key(None, &MacOsKeychainStore)?;
+    let generated = openai::generate_drafts(&base_url, &model, &api_key, &context).await?;
+    if generated.drafts.is_empty() {
+        return Err(AppError::policy(
+            "OPENAI_DRAFTS_EMPTY",
+            "模型没有返回任何 Draft；未写入本地工作区",
+        ));
+    }
+    let model_run_id = uuid::Uuid::new_v4().to_string();
+    let bundles = generated
+        .drafts
+        .into_iter()
+        .map(|draft| {
+            generated_bundle(
+                draft,
+                &input.paper_id,
+                &paper_version_id,
+                &model_run_id,
+                &anchors,
+            )
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let mut saved = Vec::with_capacity(bundles.len());
+    for bundle in bundles {
+        saved.push(save_draft_bundle_inner(&state, bundle)?);
+    }
+    Ok(json!({"modelRunId": model_run_id, "bundles": saved}))
 }
 
 fn contains_secret(value: &Value) -> bool {
@@ -733,15 +1046,39 @@ fn contains_secret(value: &Value) -> bool {
     }
 }
 
+fn validate_openai_settings(settings: &Value) -> Result<(), AppError> {
+    if let Some(base_url) = settings.get("openAiBaseUrl") {
+        let base_url = base_url.as_str().ok_or_else(|| {
+            AppError::policy("OPENAI_BASE_URL_INVALID", "openAiBaseUrl 必须是字符串")
+        })?;
+        openai::normalize_base_url(base_url)?;
+    }
+    if settings
+        .get("openAiModel")
+        .is_some_and(|model| !model.is_string())
+    {
+        return Err(AppError::policy(
+            "OPENAI_MODEL_INVALID",
+            "openAiModel 必须是字符串",
+        ));
+    }
+    Ok(())
+}
+
 #[tauri::command(rename_all = "camelCase")]
 pub fn save_settings(state: State<'_, AppState>, settings: Value) -> Result<Value, AppError> {
+    save_settings_inner(&state, settings)
+}
+
+fn save_settings_inner(state: &AppState, settings: Value) -> Result<Value, AppError> {
     if contains_secret(&settings) {
         return Err(AppError::policy(
             "SECURITY_SECRET_IN_SETTINGS",
             "设置对象不能包含密钥、令牌或密码明文；请使用系统 Keychain 引用",
         ));
     }
-    let connection = storage::connect(&state)?;
+    validate_openai_settings(&settings)?;
+    let connection = storage::connect(state)?;
     storage::upsert_json(&connection, "settings", "workspace", &settings)?;
     storage::audit(
         &connection,
@@ -769,14 +1106,47 @@ impl<T> OptionalRow<T> for Result<T, rusqlite::Error> {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
     use std::fs;
+    use std::sync::Mutex;
 
     use super::{
-        contains_secret, required_string, review_draft_inner, update_paper_metadata_inner,
-        validate_anchor_value, ReviewDraftInput, UpdatePaperMetadataInput,
+        contains_secret, credential_status_with, delete_api_key_with, generated_bundle,
+        request_api_key, required_string, review_draft_inner, save_api_key_with,
+        save_settings_inner, update_paper_metadata_inner, validate_anchor_value,
+        validate_openai_settings, ReviewDraftInput, UpdatePaperMetadataInput,
     };
+    use crate::error::AppError;
+    use crate::openai::{CredentialStore, GeneratedDraft, CREDENTIAL_REF};
     use crate::storage::{self, AppState};
     use serde_json::json;
+
+    #[derive(Default)]
+    struct MemoryCredentialStore {
+        value: Mutex<Option<String>>,
+    }
+
+    impl CredentialStore for MemoryCredentialStore {
+        fn load(&self) -> Result<Option<String>, AppError> {
+            Ok(self.value.lock().unwrap().clone())
+        }
+
+        fn save(&self, api_key: &str) -> Result<(), AppError> {
+            if api_key.trim().is_empty() {
+                return Err(AppError::policy(
+                    "OPENAI_API_KEY_REQUIRED",
+                    "API Key 不能为空",
+                ));
+            }
+            *self.value.lock().unwrap() = Some(api_key.trim().to_owned());
+            Ok(())
+        }
+
+        fn delete(&self) -> Result<(), AppError> {
+            *self.value.lock().unwrap() = None;
+            Ok(())
+        }
+    }
 
     fn test_state() -> AppState {
         let root =
@@ -805,6 +1175,93 @@ mod tests {
             "credentialRef": "keychain://paperweave/profile-id",
             "cloudMetadataEnabled": false
         })));
+        assert!(validate_openai_settings(&json!({
+            "openAiBaseUrl": "https://provider.example/v1",
+            "openAiModel": "model-a"
+        }))
+        .is_ok());
+        assert!(validate_openai_settings(&json!({
+            "openAiBaseUrl": "provider.example/v1",
+            "openAiModel": "model-a"
+        }))
+        .is_err());
+    }
+
+    #[test]
+    fn credential_commands_use_a_store_without_returning_the_key() {
+        let store = MemoryCredentialStore::default();
+        assert_eq!(
+            credential_status_with(&store).unwrap(),
+            json!({"configured": false, "credentialRef": null})
+        );
+
+        let status = save_api_key_with(&store, "test-secret").unwrap();
+        assert_eq!(
+            status,
+            json!({"configured": true, "credentialRef": CREDENTIAL_REF})
+        );
+        assert!(!status.to_string().contains("test-secret"));
+        assert_eq!(request_api_key(None, &store).unwrap(), "test-secret");
+
+        assert_eq!(
+            delete_api_key_with(&store).unwrap(),
+            json!({"configured": false, "credentialRef": null})
+        );
+    }
+
+    #[test]
+    fn model_settings_persist_only_ordinary_fields_and_credential_reference() {
+        let state = test_state();
+        let settings = json!({
+            "openAiBaseUrl": "https://provider.example/v1",
+            "openAiModel": "model-a",
+            "openAiCredentialRef": CREDENTIAL_REF,
+            "telemetryEnabled": false
+        });
+
+        save_settings_inner(&state, settings.clone()).unwrap();
+
+        let connection = storage::connect(&state).unwrap();
+        assert_eq!(
+            storage::get_json(&connection, "settings", "workspace")
+                .unwrap()
+                .unwrap(),
+            settings
+        );
+        drop(connection);
+        remove_test_state(&state);
+    }
+
+    #[test]
+    fn generated_ai_draft_keeps_model_run_and_selected_anchor() {
+        let anchor = json!({
+            "id": "anchor-1",
+            "paperVersionId": "version-1",
+            "pageIndex": 0,
+            "selectedText": "A selected reported result."
+        });
+        let anchors = HashMap::from([("anchor-1".to_owned(), anchor)]);
+        let generated = GeneratedDraft {
+            claim_text: "The evidence supports a reviewable result.".to_owned(),
+            claim_type: "empirical".to_owned(),
+            epistemic_source: "reported_result".to_owned(),
+            anchor_ids: vec!["anchor-1".to_owned()],
+            relation: "support".to_owned(),
+            support_type: "reported_result".to_owned(),
+            assumptions: vec![],
+            scope_conditions: vec![],
+            limitations: vec![],
+            confidence: 0.8,
+            confidence_basis: vec!["Selected evidence".to_owned()],
+            needs_human_attention: false,
+        };
+
+        let bundle =
+            generated_bundle(generated, "paper-1", "version-1", "run-1", &anchors).unwrap();
+        assert_eq!(bundle.draft["createdBy"], "ai");
+        assert_eq!(bundle.draft["reviewStatus"], "draft");
+        assert_eq!(bundle.draft["modelRunId"], "run-1");
+        assert_eq!(bundle.evidence_links[0]["anchorId"], "anchor-1");
     }
 
     #[test]

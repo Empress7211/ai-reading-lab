@@ -16,7 +16,9 @@ import {
   type GenerateDraftsResult,
   type ImportPdfInput,
   type ImportedPdf,
+  type ListOpenAiModelsInput,
   type OpenAiCredentialStatus,
+  type OpenAiModel,
   type ReviewDraftInput,
   type UpdatePaperMetadataInput,
   type WorkspaceRepository,
@@ -397,6 +399,10 @@ export class BrowserWorkspaceRepository implements WorkspaceRepository {
 
   async deleteOpenAiApiKey(): Promise<OpenAiCredentialStatus> {
     return { configured: false, credentialRef: null };
+  }
+
+  async listOpenAiModels(_input: ListOpenAiModelsInput): Promise<OpenAiModel[]> {
+    throw new Error('模型连接只在 PaperWeave macOS 应用中可用；浏览器开发模式不会接收或保存 API Key。');
   }
 
   async generateDrafts(_input: GenerateDraftsInput): Promise<GenerateDraftsResult> {

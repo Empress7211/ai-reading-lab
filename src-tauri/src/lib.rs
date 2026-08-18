@@ -1,5 +1,6 @@
 mod commands;
 mod error;
+mod openai;
 mod storage;
 
 use std::fs;
@@ -33,6 +34,7 @@ pub fn run() {
             commands::open_ai_credential_status,
             commands::save_open_ai_api_key,
             commands::delete_open_ai_api_key,
+            commands::list_open_ai_models,
             commands::generate_drafts,
         ])
         .run(tauri::generate_context!())

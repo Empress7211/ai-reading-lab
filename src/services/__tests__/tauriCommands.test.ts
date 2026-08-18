@@ -6,7 +6,7 @@ import {
 } from '../tauriCommands';
 
 describe('Tauri command allowlist', () => {
-  it('contains only v0.1 local product operations and deferred OpenAI ports', () => {
+  it('contains only local product operations and the configured OpenAI-compatible ports', () => {
     expect(Object.values(TAURI_COMMANDS)).toEqual([
       'workspace_initialize',
       'workspace_snapshot',
@@ -21,6 +21,7 @@ describe('Tauri command allowlist', () => {
       'open_ai_credential_status',
       'save_open_ai_api_key',
       'delete_open_ai_api_key',
+      'list_open_ai_models',
       'generate_drafts',
     ]);
     expect(isAllowedTauriCommand('execute_sync')).toBe(false);

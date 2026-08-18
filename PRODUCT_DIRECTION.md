@@ -63,7 +63,9 @@ Claim 1 ── N EvidenceLink N ── 1 EvidenceAnchor
 
 ## AI direction after the baseline
 
-The only v0.1 provider is OpenAI through the Responses API with structured output. The user supplies the key; the secret is stored only in the system Keychain, while SQLite stores a `credentialRef`.
+The desktop app exposes one provider shape: OpenAI-compatible Chat Completions. The user supplies the Base URL, API key, and model ID; the secret is stored only in macOS Keychain, while SQLite stores the Base URL, model ID, and a `credentialRef`. The model list may be loaded from `/models` or entered manually.
+
+Only the selected Evidence Anchor text and paper title are sent when the user explicitly requests an AI Draft. The complete PDF is not uploaded by this path. Returned JSON is validated and persisted only as evidence-bound Draft Claims with a `modelRunId`; it cannot create a Verified Claim or write “My Judgment.”
 
 On provider failure:
 

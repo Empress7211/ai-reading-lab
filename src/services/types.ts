@@ -20,6 +20,8 @@ export interface WorkspaceSettings {
   parserMode: 'local' | 'local-with-ocr' | 'remote-opt-in';
   activeModelProfileId: string | null;
   openAiCredentialRef: string | null;
+  openAiBaseUrl: string;
+  openAiModel: string;
 }
 
 export const DEFAULT_WORKSPACE_SETTINGS: Readonly<WorkspaceSettings> = {
@@ -31,6 +33,8 @@ export const DEFAULT_WORKSPACE_SETTINGS: Readonly<WorkspaceSettings> = {
   parserMode: 'local',
   activeModelProfileId: null,
   openAiCredentialRef: null,
+  openAiBaseUrl: 'https://api.openai.com/v1',
+  openAiModel: '',
 };
 
 export interface WorkspaceSnapshot {
@@ -107,6 +111,16 @@ export interface OpenAiCredentialStatus {
   credentialRef: string | null;
 }
 
+export interface ListOpenAiModelsInput {
+  baseUrl: string;
+  apiKey?: string;
+}
+
+export interface OpenAiModel {
+  id: string;
+  ownedBy: string | null;
+}
+
 export interface WorkspaceRepository {
   readonly runtime: RepositoryRuntime;
 
@@ -123,5 +137,6 @@ export interface WorkspaceRepository {
   openAiCredentialStatus(): Promise<OpenAiCredentialStatus>;
   saveOpenAiApiKey(apiKey: string): Promise<OpenAiCredentialStatus>;
   deleteOpenAiApiKey(): Promise<OpenAiCredentialStatus>;
+  listOpenAiModels(input: ListOpenAiModelsInput): Promise<OpenAiModel[]>;
   generateDrafts(input: GenerateDraftsInput): Promise<GenerateDraftsResult>;
 }
