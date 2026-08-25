@@ -2,6 +2,7 @@ import { useEffect, useState, type FormEvent, type ReactNode } from 'react';
 import { Button } from '../../components/Button';
 import { DemoBanner } from '../../components/DemoBanner';
 import { PageHeader } from '../../components/PageHeader';
+import { messageFromUnknown } from '../../errorMessage';
 import type {
   OpenAiCredentialStatus,
   OpenAiModel,
@@ -42,10 +43,6 @@ function normalizeBaseUrl(value: string): string {
   return normalized;
 }
 
-function messageOf(reason: unknown, fallback: string): string {
-  return reason instanceof Error ? reason.message : fallback;
-}
-
 export function SettingsPage({
   runtimeLabel,
   repository,
@@ -76,7 +73,7 @@ export function SettingsPage({
       .catch((reason) => {
         if (!cancelled) {
           setCredentialStatus({ configured: false, credentialRef: null });
-          setFeedback({ kind: 'error', text: messageOf(reason, '无法读取 Keychain 配置状态。') });
+          setFeedback({ kind: 'error', text: messageFromUnknown(reason, '无法读取本机 API Key 配置状态。') });
         }
       });
     return () => { cancelled = true; };
@@ -94,7 +91,7 @@ export function SettingsPage({
     try {
       normalizedBaseUrl = normalizeBaseUrl(baseUrl);
     } catch (reason) {
-      setFeedback({ kind: 'error', text: messageOf(reason, 'Base URL 无效。') });
+      setFeedback({ kind: 'error', text: messageFromUnknown(reason, 'Base URL 无效。') });
       return;
     }
     const normalizedModel = model.trim();
@@ -128,10 +125,10 @@ export function SettingsPage({
       onSettingsSaved(saved);
       setFeedback({ kind: 'success', text: '模型配置已保存；API Key 不会回显。' });
     } catch (reason) {
-      const detail = messageOf(reason, '模型配置保存失败。');
+      const detail = messageFromUnknown(reason, '模型配置保存失败。');
       setFeedback({
         kind: 'error',
-        text: keySaved ? `API Key 已写入 Keychain，但模型设置保存失败：${detail}` : detail,
+        text: keySaved ? `API Key 已保存到 PaperWeave，但模型设置保存失败：${detail}` : detail,
       });
     } finally {
       setPendingAction(null);
@@ -141,19 +138,19 @@ export function SettingsPage({
   const loadModels = async () => {
     setFeedback(null);
     if (!nativeRuntime) {
-      setFeedback({ kind: 'error', text: '模型连接测试仅在 PaperWeave macOS 应用中可用。' });
+      setFeedback({ kind: 'error', text: '模型列表仅在 PaperWeave macOS 应用中可加载。' });
       return;
     }
     let normalizedBaseUrl: string;
     try {
       normalizedBaseUrl = normalizeBaseUrl(baseUrl);
     } catch (reason) {
-      setFeedback({ kind: 'error', text: messageOf(reason, 'Base URL 无效。') });
+      setFeedback({ kind: 'error', text: messageFromUnknown(reason, 'Base URL 无效。') });
       return;
     }
     const normalizedKey = apiKey.trim();
     if (!normalizedKey && !credentialStatus?.configured) {
-      setFeedback({ kind: 'error', text: '请先填写 API Key，或保存一个 Keychain 密钥。' });
+      setFeedback({ kind: 'error', text: '请先填写 API Key，或先保存模型配置。' });
       return;
     }
 
@@ -167,12 +164,12 @@ export function SettingsPage({
       setFeedback({
         kind: 'success',
         text: available.length > 0
-          ? `连接成功，已加载 ${available.length} 个模型。`
-          : '连接成功，但服务没有返回模型；仍可手动填写模型 ID。',
+          ? `已加载 ${available.length} 个模型。`
+          : '服务没有返回模型列表；仍可手动填写模型 ID。',
       });
     } catch (reason) {
       setModels([]);
-      setFeedback({ kind: 'error', text: messageOf(reason, '模型列表加载失败。') });
+      setFeedback({ kind: 'error', text: messageFromUnknown(reason, '模型列表加载失败。') });
     } finally {
       setPendingAction(null);
     }
@@ -189,9 +186,9 @@ export function SettingsPage({
       const saved = await repository.saveSettings({ ...settings, openAiCredentialRef: null });
       setApiKey('');
       onSettingsSaved(saved);
-      setFeedback({ kind: 'success', text: 'Keychain 中的 API Key 已删除；模型地址与 ID 保留。' });
+      setFeedback({ kind: 'success', text: 'PaperWeave 中保存的 API Key 已清除；模型地址与 ID 保留。' });
     } catch (reason) {
-      const detail = messageOf(reason, 'API Key 删除失败。');
+      const detail = messageFromUnknown(reason, 'API Key 删除失败。');
       setFeedback({
         kind: 'error',
         text: keyDeleted ? `API Key 已删除，但本地引用更新失败：${detail}` : detail,
@@ -220,17 +217,17 @@ export function SettingsPage({
             <form className="model-settings-form" onSubmit={(event) => void saveConfiguration(event)}>
               <div className="field-grid">
                 <label className="field-full" htmlFor="model-provider"><span>Provider</span><input id="model-provider" aria-label="Provider" value="OpenAI Compatible" disabled /></label>
-                <label className="field-full" htmlFor="model-base-url"><span>Base URL</span><input id="model-base-url" aria-label="Base URL" value={baseUrl} onChange={(event) => setBaseUrl(event.target.value)} placeholder="https://api.openai.com/v1" disabled={!nativeRuntime || pendingAction !== null} /><small>请包含服务要求的版本路径，例如 /v1；应用会请求 /models 与 /chat/completions。</small></label>
-                <label className="field-full" htmlFor="model-api-key"><span>API Key</span><input id="model-api-key" aria-label="API Key" type="password" autoComplete="new-password" value={apiKey} onChange={(event) => setApiKey(event.target.value)} placeholder={credentialStatus?.configured ? '已保存在 macOS Keychain；输入新值可替换' : '输入自己的 API Key'} disabled={!nativeRuntime || pendingAction !== null} /><small>密钥只写入 macOS Keychain，不保存到 SQLite，也不会在此处回显。</small></label>
-                <label className="field-full" htmlFor="model-id"><span>模型 ID</span><input id="model-id" aria-label="模型 ID" list="openai-model-options" value={model} onChange={(event) => setModel(event.target.value)} placeholder="选择已加载模型，或手动填写模型 ID" disabled={!nativeRuntime || pendingAction !== null} /><small>兼容服务未开放 /models 时，可以直接手动填写。</small></label>
+                <label className="field-full" htmlFor="model-base-url"><span>Base URL</span><input id="model-base-url" aria-label="Base URL" value={baseUrl} onChange={(event) => setBaseUrl(event.target.value)} placeholder="https://api.openai.com/v1" disabled={!nativeRuntime || pendingAction !== null} /><small>请包含服务要求的版本路径，例如 /v1。只有点击“加载模型列表（可选）”时才请求 /models；生成 AI Draft 时才请求 /chat/completions。</small></label>
+                <label className="field-full" htmlFor="model-api-key"><span>API Key</span><input id="model-api-key" aria-label="API Key" type="password" autoComplete="new-password" value={apiKey} onChange={(event) => setApiKey(event.target.value)} placeholder={credentialStatus?.configured ? '已保存在 PaperWeave；输入新值可替换' : '输入自己的 API Key'} disabled={!nativeRuntime || pendingAction !== null} /><small>首次保存后由 PaperWeave 在本机持续使用，不会在每次生成时询问；此处不回显密钥。</small></label>
+                <label className="field-full" htmlFor="model-id"><span>模型 ID</span><input id="model-id" aria-label="模型 ID" list="openai-model-options" value={model} onChange={(event) => setModel(event.target.value)} placeholder="选择已加载模型，或手动填写模型 ID" disabled={!nativeRuntime || pendingAction !== null} /><small>/models 加载失败不代表 /chat/completions 不可用；可以直接手动填写模型 ID。</small></label>
                 <datalist id="openai-model-options">{models.map((item) => <option key={item.id} value={item.id}>{item.ownedBy ?? ''}</option>)}</datalist>
               </div>
-              <div className="credential-state"><strong>密钥状态</strong><span>{credentialStatus === null ? '正在读取…' : credentialStatus.configured ? '已配置于 Keychain' : '未配置'}</span></div>
+              <div className="credential-state"><strong>密钥状态</strong><span>{credentialStatus === null ? '正在读取…' : credentialStatus.configured ? '已保存在 PaperWeave' : '未配置'}</span></div>
               {feedback ? <p className={feedback.kind === 'error' ? 'inline-error' : 'inline-success'} role={feedback.kind === 'error' ? 'alert' : 'status'}>{feedback.text}</p> : null}
               <div className="settings-actions">
                 <Button type="submit" variant="primary" disabled={!nativeRuntime || credentialStatus === null || pendingAction !== null}>{pendingAction === 'save' ? '正在保存…' : '保存配置'}</Button>
-                <Button disabled={!nativeRuntime || credentialStatus === null || pendingAction !== null} onClick={() => void loadModels()}>{pendingAction === 'models' ? '正在连接…' : '测试连接并加载模型'}</Button>
-                <Button variant="danger" disabled={!nativeRuntime || !credentialStatus?.configured || pendingAction !== null} onClick={() => void deleteCredential()}>{pendingAction === 'delete' ? '正在删除…' : '删除 Keychain 密钥'}</Button>
+                <Button disabled={!nativeRuntime || credentialStatus === null || pendingAction !== null} onClick={() => void loadModels()}>{pendingAction === 'models' ? '正在加载…' : '加载模型列表（可选）'}</Button>
+                <Button variant="danger" disabled={!nativeRuntime || !credentialStatus?.configured || pendingAction !== null} onClick={() => void deleteCredential()}>{pendingAction === 'delete' ? '正在清除…' : '清除已保存的 API Key'}</Button>
               </div>
               {!nativeRuntime ? <p className="setting-note">浏览器开发模式不会接收或存储 API Key。请在 macOS 桌面应用中完成配置。</p> : null}
             </form>

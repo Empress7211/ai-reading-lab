@@ -16,7 +16,7 @@ describe('runtime capabilities', () => {
     expect(capabilities.tasks['workspace.storage'].state).toBe('demo');
     expect(capabilities.tasks['zotero.write'].state).toBe('native-unavailable');
     expect(capabilities.tasks['git.commit'].state).toBe('native-unavailable');
-    expect(capabilities.tasks['keychain.secrets'].state).toBe('native-unavailable');
+    expect(capabilities.tasks['local.provider-credentials'].state).toBe('native-unavailable');
   });
 
   it('exposes demo and unavailable states per task', () => {

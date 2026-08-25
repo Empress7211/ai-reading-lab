@@ -4,6 +4,7 @@ import type {
   EvidenceLink,
   JudgmentNote,
   Paper,
+  PaperMapArtifact,
   ReviewAction,
   VerifiedClaim,
 } from '../domain';
@@ -14,6 +15,7 @@ import {
   type DraftBundle,
   type GenerateDraftsInput,
   type GenerateDraftsResult,
+  type GeneratePaperMapInput,
   type ImportPdfInput,
   type ImportedPdf,
   type ListOpenAiModelsInput,
@@ -89,6 +91,7 @@ function emptySnapshot(seed: WorkspaceSeed = {}): WorkspaceSnapshot {
     verifiedClaims,
     userNotes: clone(seed.userNotes ?? []),
     judgments: clone(seed.judgments ?? []),
+    paperMaps: clone(seed.paperMaps ?? []),
     settings: {
       ...DEFAULT_WORKSPACE_SETTINGS,
       ...clone(seed.settings ?? {}),
@@ -394,7 +397,7 @@ export class BrowserWorkspaceRepository implements WorkspaceRepository {
   }
 
   async saveOpenAiApiKey(): Promise<OpenAiCredentialStatus> {
-    throw new Error('OpenAI API Key 只能在 PaperWeave macOS 应用的系统 Keychain 中配置。');
+    throw new Error('OpenAI API Key 只能在 PaperWeave macOS 应用的本机配置中保存。');
   }
 
   async deleteOpenAiApiKey(): Promise<OpenAiCredentialStatus> {
@@ -407,6 +410,10 @@ export class BrowserWorkspaceRepository implements WorkspaceRepository {
 
   async generateDrafts(_input: GenerateDraftsInput): Promise<GenerateDraftsResult> {
     throw new Error('AI Draft 只在 PaperWeave macOS 应用中可用；浏览器开发模式不会保存密钥或伪造结果。');
+  }
+
+  async generatePaperMap(_input: GeneratePaperMapInput): Promise<PaperMapArtifact> {
+    throw new Error('AI 论证地图只在 PaperWeave macOS 应用中可用；浏览器开发模式不会上传全文或伪造结果。');
   }
 
   async #update(

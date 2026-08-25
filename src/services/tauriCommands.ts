@@ -14,6 +14,7 @@ export const TAURI_COMMANDS = {
   deleteOpenAiApiKey: 'delete_open_ai_api_key',
   listOpenAiModels: 'list_open_ai_models',
   generateDrafts: 'generate_drafts',
+  generatePaperMap: 'generate_paper_map',
 } as const;
 
 export type TauriCommand = (typeof TAURI_COMMANDS)[keyof typeof TAURI_COMMANDS];

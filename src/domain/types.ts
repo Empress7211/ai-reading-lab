@@ -62,6 +62,8 @@ export interface EvidenceAnchor {
   readonly paperVersionId: UUID;
   readonly pageIndex: number;
   readonly bboxNorm: NormalizedBoundingBox;
+  /** Precise per-line selection geometry. Older Anchors may only have bboxNorm. */
+  readonly rectsNorm?: readonly NormalizedBoundingBox[];
   readonly selectedText: string;
   readonly prefix: string;
   readonly suffix: string;
@@ -134,7 +136,7 @@ export interface Claim {
   readonly assumptions: readonly string[];
   readonly scopeConditions: readonly string[];
   readonly limitations: readonly string[];
-  readonly confidence: number;
+  readonly confidence: number | null;
   readonly confidenceBasis: readonly string[];
   readonly reviewStatus: ReviewStatus;
   readonly createdBy: ClaimCreator;
@@ -168,7 +170,7 @@ export interface ClaimPatch {
   readonly assumptions?: readonly string[];
   readonly scopeConditions?: readonly string[];
   readonly limitations?: readonly string[];
-  readonly confidence?: number;
+  readonly confidence?: number | null;
   readonly confidenceBasis?: readonly string[];
   readonly needsHumanAttention?: boolean;
   readonly userComment?: string | null;
@@ -222,6 +224,7 @@ export type ValidationSeverity = "error" | "warning";
 
 export type ClaimValidationIssueCode =
   | "ANCHOR_BBOX_INVALID"
+  | "ANCHOR_RECTS_INVALID"
   | "ANCHOR_HASH_INVALID"
   | "ANCHOR_NOT_FOUND"
   | "ANCHOR_ORPHANED"
@@ -276,6 +279,7 @@ export interface PaperMarkdownExport {
   readonly authors: readonly string[];
   readonly year: number | null;
   readonly identifiers: readonly PaperIdentifier[];
+  readonly judgment: JudgmentNote;
   readonly claims: readonly Claim[];
   readonly anchors: ReadonlyMap<UUID, EvidenceAnchor>;
   readonly evidenceLinks: ReadonlyMap<UUID, EvidenceLink>;

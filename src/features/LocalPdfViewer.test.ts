@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import type { EvidenceAnchor } from '../domain';
-import { classifyAnchorForPdf, readTextContent } from './LocalPdfViewer';
+import {
+  classifyAnchorForPdf,
+  readTextContent,
+  selectionGeometryForPage,
+} from './LocalPdfViewer';
 
 function anchor(overrides: Partial<EvidenceAnchor> = {}): EvidenceAnchor {
   return {
@@ -30,6 +34,25 @@ const context = {
 };
 
 describe('persisted PDF Anchor location state', () => {
+  it('keeps multi-line selections as precise fragments instead of one painted slab', () => {
+    const geometry = selectionGeometryForPage(
+      { left: 100, top: 200, right: 1100, bottom: 1200, width: 1000, height: 1000 },
+      [
+        { left: 200, top: 300, right: 600, bottom: 325 },
+        { left: 200, top: 340, right: 480, bottom: 365 },
+        { left: 1200, top: 340, right: 1250, bottom: 365 },
+      ],
+    );
+
+    expect(geometry).toEqual({
+      bboxNorm: [0.1, 0.1, 0.5, 0.165],
+      rectsNorm: [
+        [0.1, 0.1, 0.5, 0.125],
+        [0.1, 0.14, 0.38, 0.165],
+      ],
+    });
+  });
+
   it('reads PDF.js text chunks without requiring ReadableStream async iteration', async () => {
     const stream = new ReadableStream({
       start(controller) {

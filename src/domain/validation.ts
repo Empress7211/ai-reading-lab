@@ -85,6 +85,31 @@ export function validateAnchor(anchor: EvidenceAnchor): ClaimValidationResult {
     );
   }
 
+  if (
+    anchor.rectsNorm !== undefined &&
+    (
+      !Array.isArray(anchor.rectsNorm) ||
+      anchor.rectsNorm.length === 0 ||
+      anchor.rectsNorm.some((rect) => {
+        if (!Array.isArray(rect) || rect.length !== 4) return true;
+        const [rectX0, rectY0, rectX1, rectY1] = rect;
+        return (
+          rect.some((value) => !Number.isFinite(value) || value < 0 || value > 1) ||
+          rectX0 >= rectX1 ||
+          rectY0 >= rectY1
+        );
+      })
+    )
+  ) {
+    issues.push(
+      issue(
+        "ANCHOR_RECTS_INVALID",
+        "rectsNorm",
+        "Anchor selection fragments must contain non-empty normalized rectangles.",
+      ),
+    );
+  }
+
   if (anchor.anchorType === "text" && anchor.selectedText.trim().length === 0) {
     issues.push(
       issue("ANCHOR_TEXT_REQUIRED", "selectedText", "A text anchor must retain selected text."),
@@ -132,12 +157,19 @@ export function validateClaim(
     );
   }
 
-  if (!Number.isFinite(claim.confidence) || claim.confidence < 0 || claim.confidence > 1) {
+  const confidenceIsNumber = typeof claim.confidence === "number"
+    && Number.isFinite(claim.confidence)
+    && claim.confidence >= 0
+    && claim.confidence <= 1;
+  if (
+    (claim.createdBy === "ai" && !confidenceIsNumber)
+    || (claim.createdBy === "user" && claim.confidence !== null && !confidenceIsNumber)
+  ) {
     issues.push(
       issue(
         "CLAIM_CONFIDENCE_INVALID",
         "confidence",
-        "Claim confidence must be between zero and one.",
+        "AI Claim confidence must be between zero and one; a user Claim may omit it.",
       ),
     );
   }

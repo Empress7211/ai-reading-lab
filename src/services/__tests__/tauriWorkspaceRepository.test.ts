@@ -15,6 +15,7 @@ describe('TauriWorkspaceRepository', () => {
     expect(snapshot.settings.openAiBaseUrl).toBe('https://api.openai.com/v1');
     expect(snapshot.settings.openAiModel).toBe('');
     expect(snapshot.settings.openAiCredentialRef).toBeNull();
+    expect(snapshot.paperMaps).toEqual([]);
   });
 
   it('loads PDF bytes by paper id without accepting a path', async () => {
@@ -69,5 +70,25 @@ describe('TauriWorkspaceRepository', () => {
         apiKey: 'temporary-test-key',
       },
     });
+  });
+
+  it('generates a paper map with the exact confirmed local document index', async () => {
+    const artifact = { id: 'paper-map-paper-1', schemaVersion: 'paper_map.v1', nodes: [] };
+    const invoke = vi.fn().mockResolvedValue(artifact);
+    const repository = new TauriWorkspaceRepository(invoke);
+    const input = {
+      paperId: 'paper-1',
+      paperVersionId: 'version-1',
+      confirmedFullTextUpload: true,
+      documentIndex: {
+        pdfSha256: `sha256:${'b'.repeat(64)}`,
+        parserVersion: 'paperweave-blocks-v1-pdfjs-5.6.205' as const,
+        pageCount: 1,
+        blocks: [{ id: 'p0001-b0001', page: 1, bbox: [0.1, 0.2, 0.8, 0.24] as const, kind: 'paragraph' as const, sectionPath: ['Results'], text: 'Local structured text.' }],
+      },
+    };
+
+    await expect(repository.generatePaperMap(input)).resolves.toEqual(artifact);
+    expect(invoke).toHaveBeenCalledWith('generate_paper_map', { input });
   });
 });

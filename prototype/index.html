@@ -1013,7 +1013,7 @@
     }
 
     function renderSettings() {
-      return `<div class="page">${demoBanner()}<div class="section-heading"><div><h1>设置</h1><p>密钥只保存到系统钥匙串；原型不会实际保存输入。</p></div></div><div class="settings-layout">
+      return `<div class="page">${demoBanner()}<div class="section-heading"><div><h1>设置</h1><p>密钥由 PaperWeave 在本机持续保存；原型不会实际保存输入。</p></div></div><div class="settings-layout">
         <nav class="settings-nav">${[['models','模型与路由'],['workspace','工作区'],['zotero','Zotero'],['git','Git / GitHub'],['privacy','隐私与云端'],['parsing','PDF 与解析']].map(([k,l])=>`<button class="${state.settingsTab===k?'active':''}" data-action="settings-tab" data-tab="${k}">${l}</button>`).join('')}</nav>
         ${settingsContent()}
       </div></div>`;
@@ -1287,7 +1287,7 @@
       else if (action==='settings-tab') {state.settingsTab=actionEl.dataset.tab;renderView();}
       else if (action==='toggle-setting') {actionEl.classList.toggle('on');}
       else if (action==='test-model') toast('连接与能力检测通过','支持 streaming、JSON schema、vision；这是原型模拟结果。');
-      else if (action==='save-settings') toast('设置已保存','真实产品会把密钥写入系统钥匙串，而不是数据库。');
+      else if (action==='save-settings') toast('设置已保存','真实产品会把密钥保存到 PaperWeave 本机配置，之后可替换或清除。');
       else if (action==='show-toast') toast('原型提示',actionEl.dataset.toast||'操作已记录。');
       else if (action==='ask-suggestion') {const input=document.getElementById('askInput');if(input){input.value=actionEl.dataset.question;input.focus();}}
       else if (action==='ask-submit') {

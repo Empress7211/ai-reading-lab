@@ -19,7 +19,7 @@ PaperWeave 处理四类高敏感资产：未公开研究想法、受版权保护
 | S1 Personal | 阅读状态、偏好、主题名称 | 本地；云同步需许可 |
 | S2 Research-sensitive | 私有笔记、未公开假设、Zotero 库结构 | 本地；默认不遥测、不上传 |
 | S3 Licensed content | 订阅 PDF、论文全文、图表 | 本地；只发送到用户明确选择的模型 Provider |
-| S4 Secret | LLM key、Zotero write key、Git token/SSH key | OS keychain/平台凭据存储；不可导出明文 |
+| S4 Secret | LLM key、Zotero write key、Git token/SSH key | LLM key 使用 PaperWeave 本机配置；其他凭据沿用对应平台存储；均不可导出明文 |
 
 任何新功能必须先标注输入/输出数据等级和跨边界流向。
 
@@ -79,8 +79,8 @@ PaperWeave 处理四类高敏感资产：未公开研究想法、受版权保护
 
 ### 4.4 凭据
 
-- 密钥写 OS keychain；
-- 数据库只保存 credential reference；
+- 模型 API Key 隔离保存为 PaperWeave 本机 `local_credential`，首次保存后持续使用；
+- 工作区设置只保存 credential reference，API Key 不进入工作区快照或导出；
 - UI 只能替换/删除/测试，不能回读；
 - 子进程通过短期内存或管道获取必要凭据，不写环境快照；
 - 错误消息做 secret redaction；
@@ -254,7 +254,7 @@ Privacy Center 显示：
 | PDF Anchor 因版本变化失效 | 高 | 中 | hash/坐标/文本多重锚定、迁移队列 | Reader |
 | Zotero 写入污染用户库 | 中 | 高 | marker、预览、幂等、测试矩阵 | Integration |
 | Git 覆盖用户手写内容 | 中 | 高 | 管理区块、deterministic renderer、冲突停止 | Integration |
-| 用户密钥泄露 | 低 | 极高 | keychain、redaction、最小进程暴露 | Security |
+| 用户密钥泄露 | 低 | 极高 | PaperWeave 本机凭据隔离、redaction、最小进程暴露 | Security |
 | 恶意 PDF 利用解析器 | 中 | 高 | 沙箱、限制、更新、禁用主动内容 | Security |
 | Provider 接收敏感全文 | 中 | 高 | 范围提示、local-only profile、最小上下文 | Privacy |
 | API 许可/价格变化 | 高 | 中 | Provider 抽象、缓存、降级、合同审查 | Platform |

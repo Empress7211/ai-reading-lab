@@ -1,5 +1,5 @@
 import { invoke as tauriInvoke } from '@tauri-apps/api/core';
-import type { EvidenceAnchor, JudgmentNote, Paper, ReviewAction } from '../domain';
+import type { EvidenceAnchor, JudgmentNote, Paper, PaperMapArtifact, ReviewAction } from '../domain';
 import {
   TAURI_COMMANDS,
   createAllowlistedInvoke,
@@ -9,6 +9,7 @@ import type {
   DraftBundle,
   GenerateDraftsInput,
   GenerateDraftsResult,
+  GeneratePaperMapInput,
   ImportPdfInput,
   ImportedPdf,
   ListOpenAiModelsInput,
@@ -26,6 +27,7 @@ import { DEFAULT_WORKSPACE_SETTINGS } from './types';
 function normalizeSnapshot(snapshot: WorkspaceSnapshot): WorkspaceSnapshot {
   return {
     ...snapshot,
+    paperMaps: snapshot.paperMaps ?? [],
     settings: {
       ...DEFAULT_WORKSPACE_SETTINGS,
       ...snapshot.settings,
@@ -138,5 +140,9 @@ export class TauriWorkspaceRepository implements WorkspaceRepository {
 
   generateDrafts(input: GenerateDraftsInput): Promise<GenerateDraftsResult> {
     return this.#invoke<GenerateDraftsResult>(TAURI_COMMANDS.generateDrafts, { input });
+  }
+
+  generatePaperMap(input: GeneratePaperMapInput): Promise<PaperMapArtifact> {
+    return this.#invoke<PaperMapArtifact>(TAURI_COMMANDS.generatePaperMap, { input });
   }
 }

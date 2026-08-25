@@ -36,6 +36,9 @@ function snapshotAiDraft(claim: Claim): AiDraftSnapshot | null {
   if (claim.createdBy !== "ai") {
     return null;
   }
+  if (claim.confidence === null) {
+    throw new Error("AI Draft confidence must be a number before review.");
+  }
 
   return {
     claimText: claim.claimText,
@@ -151,7 +154,7 @@ function applyPatch(claim: Claim, patch: ClaimPatch): Claim {
     ...(hasOwn(patch, "limitations")
       ? { limitations: [...(patch.limitations as readonly string[])] }
       : {}),
-    ...(hasOwn(patch, "confidence") ? { confidence: patch.confidence as number } : {}),
+    ...(hasOwn(patch, "confidence") ? { confidence: patch.confidence as number | null } : {}),
     ...(hasOwn(patch, "confidenceBasis")
       ? { confidenceBasis: [...(patch.confidenceBasis as readonly string[])] }
       : {}),

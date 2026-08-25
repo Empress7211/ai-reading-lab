@@ -2,17 +2,25 @@ use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io::Read;
 
-use rusqlite::params;
+use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use tauri::State;
 
 use crate::error::AppError;
-use crate::openai::{self, CredentialStore, MacOsKeychainStore};
+use crate::openai::{self, CredentialStore};
 use crate::storage::{self, AppState};
 
 const MAX_PDF_BYTES: u64 = 512 * 1024 * 1024;
+const MAX_OPENAI_DRAFTS: usize = 3;
+const PAPER_MAP_PARSER_VERSION: &str = "paperweave-blocks-v1-pdfjs-5.6.205";
+const MAX_PAPER_MAP_PAGES: u32 = 300;
+const MAX_PAPER_MAP_BLOCKS: usize = 5_000;
+const MAX_PAPER_MAP_TEXT_CHARS: usize = 200_000;
+const MAX_PAPER_MAP_BLOCK_CHARS: usize = 8_000;
+const LOCAL_CREDENTIAL_ENTITY_TYPE: &str = "local_credential";
+const OPENAI_CREDENTIAL_ID: &str = "openai-compatible";
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -26,6 +34,7 @@ pub struct WorkspaceSnapshot {
     pub verified_claims: Vec<Value>,
     pub user_notes: Vec<Value>,
     pub judgments: Vec<Value>,
+    pub paper_maps: Vec<Value>,
     pub settings: Value,
 }
 
@@ -66,6 +75,96 @@ pub struct GenerateDraftsInput {
     pub anchor_ids: Vec<String>,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DocumentBlockInput {
+    pub id: String,
+    pub page: u32,
+    pub bbox: [f64; 4],
+    pub kind: String,
+    pub section_path: Vec<String>,
+    pub text: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LocalDocumentIndexInput {
+    pub pdf_sha256: String,
+    pub parser_version: String,
+    pub page_count: u32,
+    pub blocks: Vec<DocumentBlockInput>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GeneratePaperMapInput {
+    pub paper_id: String,
+    pub paper_version_id: String,
+    pub confirmed_full_text_upload: bool,
+    pub document_index: LocalDocumentIndexInput,
+}
+
+struct LocalCredentialStore<'a> {
+    state: &'a AppState,
+}
+
+impl<'a> LocalCredentialStore<'a> {
+    fn new(state: &'a AppState) -> Self {
+        Self { state }
+    }
+}
+
+impl CredentialStore for LocalCredentialStore<'_> {
+    fn load(&self) -> Result<Option<String>, AppError> {
+        let connection = storage::connect(self.state)?;
+        let Some(value) = storage::get_json(
+            &connection,
+            LOCAL_CREDENTIAL_ENTITY_TYPE,
+            OPENAI_CREDENTIAL_ID,
+        )?
+        else {
+            return Ok(None);
+        };
+        let api_key = value
+            .get("apiKey")
+            .and_then(Value::as_str)
+            .filter(|value| !value.trim().is_empty())
+            .ok_or_else(|| {
+                AppError::policy(
+                    "OPENAI_CREDENTIAL_INVALID",
+                    "PaperWeave 本机保存的 API Key 无效，请在设置中重新保存",
+                )
+            })?;
+        Ok(Some(api_key.trim().to_owned()))
+    }
+
+    fn save(&self, api_key: &str) -> Result<(), AppError> {
+        let normalized = api_key.trim();
+        if normalized.is_empty() {
+            return Err(AppError::policy(
+                "OPENAI_API_KEY_REQUIRED",
+                "API Key 不能为空",
+            ));
+        }
+        let connection = storage::connect(self.state)?;
+        storage::upsert_json(
+            &connection,
+            LOCAL_CREDENTIAL_ENTITY_TYPE,
+            OPENAI_CREDENTIAL_ID,
+            &json!({"apiKey": normalized}),
+        )
+    }
+
+    fn delete(&self) -> Result<(), AppError> {
+        let connection = storage::connect(self.state)?;
+        storage::delete_json(
+            &connection,
+            LOCAL_CREDENTIAL_ENTITY_TYPE,
+            OPENAI_CREDENTIAL_ID,
+        )
+    }
+}
+
 fn required_string<'a>(value: &'a Value, key: &str) -> Result<&'a str, AppError> {
     value
         .get(key)
@@ -77,6 +176,31 @@ fn required_string<'a>(value: &'a Value, key: &str) -> Result<&'a str, AppError>
 fn is_sha256(value: &str) -> bool {
     let normalized = value.strip_prefix("sha256:").unwrap_or(value);
     normalized.len() == 64 && normalized.bytes().all(|byte| byte.is_ascii_hexdigit())
+}
+
+fn validate_normalized_bbox(value: &Value, field: &str) -> Result<(), AppError> {
+    let bbox = value
+        .as_array()
+        .filter(|values| values.len() == 4)
+        .ok_or_else(|| {
+            AppError::policy("ANCHOR_BBOX_INVALID", format!("{field} 必须包含四个坐标"))
+        })?;
+    let coordinates: Option<Vec<f64>> = bbox.iter().map(Value::as_f64).collect();
+    let coordinates = coordinates.ok_or_else(|| {
+        AppError::policy("ANCHOR_BBOX_INVALID", format!("{field} 坐标必须是有限数字"))
+    })?;
+    if coordinates
+        .iter()
+        .any(|coordinate| !coordinate.is_finite() || !(0.0..=1.0).contains(coordinate))
+        || coordinates[0] >= coordinates[2]
+        || coordinates[1] >= coordinates[3]
+    {
+        return Err(AppError::policy(
+            "ANCHOR_BBOX_INVALID",
+            format!("{field} 必须是非空的归一化矩形"),
+        ));
+    }
+    Ok(())
 }
 
 fn validate_anchor_value(anchor: &Value) -> Result<(), AppError> {
@@ -101,24 +225,28 @@ fn validate_anchor_value(anchor: &Value) -> Result<(), AppError> {
             "pageIndex 必须大于等于 0",
         ));
     }
-    let bbox = anchor
-        .get("bboxNorm")
-        .and_then(Value::as_array)
-        .filter(|values| values.len() == 4)
-        .ok_or_else(|| AppError::policy("ANCHOR_BBOX_INVALID", "bboxNorm 必须包含四个坐标"))?;
-    let coordinates: Option<Vec<f64>> = bbox.iter().map(Value::as_f64).collect();
-    let coordinates = coordinates
-        .ok_or_else(|| AppError::policy("ANCHOR_BBOX_INVALID", "bboxNorm 坐标必须是有限数字"))?;
-    if coordinates
-        .iter()
-        .any(|value| !value.is_finite() || !(0.0..=1.0).contains(value))
-        || coordinates[0] >= coordinates[2]
-        || coordinates[1] >= coordinates[3]
+    validate_normalized_bbox(anchor.get("bboxNorm").unwrap_or(&Value::Null), "bboxNorm")?;
+    if anchor.get("createdBy").and_then(Value::as_str) == Some("user_selection")
+        && anchor.get("rectsNorm").is_none()
     {
         return Err(AppError::policy(
-            "ANCHOR_BBOX_INVALID",
-            "bboxNorm 必须是非空的归一化矩形",
+            "ANCHOR_RECTS_REQUIRED",
+            "手工文字选区必须包含逐行矩形，请重新选择原文",
         ));
+    }
+    if let Some(rects_value) = anchor.get("rectsNorm") {
+        let rects = rects_value
+            .as_array()
+            .filter(|rects| !rects.is_empty())
+            .ok_or_else(|| {
+                AppError::policy(
+                    "ANCHOR_RECTS_INVALID",
+                    "rectsNorm 必须包含至少一个逐行选区矩形",
+                )
+            })?;
+        for (index, rect) in rects.iter().enumerate() {
+            validate_normalized_bbox(rect, &format!("rectsNorm[{index}]"))?;
+        }
     }
     if anchor.get("anchorType").and_then(Value::as_str) == Some("text") {
         required_string(anchor, "selectedText")?;
@@ -133,7 +261,7 @@ fn snapshot(state: &AppState) -> Result<WorkspaceSnapshot, AppError> {
         .next()
         .unwrap_or_else(|| json!({"schemaVersion": 1, "cloudMetadataEnabled": false}));
     Ok(WorkspaceSnapshot {
-        schema_version: 2,
+        schema_version: 3,
         papers: storage::list_json(&connection, "paper")?,
         anchors: storage::list_json(&connection, "anchor")?,
         evidence_links: storage::list_json(&connection, "evidence_link")?,
@@ -142,6 +270,7 @@ fn snapshot(state: &AppState) -> Result<WorkspaceSnapshot, AppError> {
         verified_claims: storage::list_json(&connection, "verified_claim")?,
         user_notes: storage::list_json(&connection, "user_note")?,
         judgments: storage::list_json(&connection, "judgment")?,
+        paper_maps: storage::list_json(&connection, "paper_map")?,
         settings,
     })
 }
@@ -396,6 +525,14 @@ pub fn save_draft_bundle(
 }
 
 fn save_draft_bundle_inner(state: &AppState, bundle: DraftBundleInput) -> Result<Value, AppError> {
+    let mut saved = save_draft_bundles_inner(state, vec![bundle])?;
+    Ok(saved.remove(0))
+}
+
+fn validate_draft_bundle(
+    connection: &Connection,
+    bundle: &DraftBundleInput,
+) -> Result<(), AppError> {
     let draft = &bundle.draft;
     let id = required_string(draft, "id")?;
     required_string(draft, "paperId")?;
@@ -450,7 +587,6 @@ fn save_draft_bundle_inner(state: &AppState, bundle: DraftBundleInput) -> Result
             "Draft 必须与 EvidenceLink 原子保存",
         ));
     }
-    let mut connection = storage::connect(state)?;
     let requested_ids: Vec<&str> = evidence_link_ids.iter().filter_map(Value::as_str).collect();
     if requested_ids.len() != evidence_link_ids.len()
         || requested_ids.len() != bundle.evidence_links.len()
@@ -479,28 +615,54 @@ fn save_draft_bundle_inner(state: &AppState, bundle: DraftBundleInput) -> Result
             ));
         }
         let anchor_id = required_string(link, "anchorId")?;
-        if storage::get_json(&connection, "anchor", anchor_id)?.is_none() {
+        if storage::get_json(connection, "anchor", anchor_id)?.is_none() {
             return Err(AppError::policy(
                 "ANCHOR_NOT_FOUND",
                 format!("不存在 Anchor {anchor_id}"),
             ));
         }
     }
-    let transaction = connection.transaction()?;
+    Ok(())
+}
+
+fn insert_draft_bundle(
+    connection: &Connection,
+    bundle: &DraftBundleInput,
+) -> Result<Value, AppError> {
+    let draft = &bundle.draft;
+    let id = required_string(draft, "id")?;
+    let creator = required_string(draft, "createdBy")?;
     for link in &bundle.evidence_links {
         let link_id = required_string(link, "id")?;
-        storage::insert_json(&transaction, "evidence_link", link_id, link)?;
+        storage::insert_json(connection, "evidence_link", link_id, link)?;
     }
-    storage::insert_json(&transaction, "draft", id, draft)?;
+    storage::insert_json(connection, "draft", id, draft)?;
     storage::audit(
-        &transaction,
+        connection,
         "DraftClaimCreated",
         "draft",
         id,
         &json!({"evidenceLinkCount": bundle.evidence_links.len(), "createdBy": creator}),
     )?;
-    transaction.commit()?;
     Ok(json!({"draft": draft, "evidenceLinks": bundle.evidence_links}))
+}
+
+fn save_draft_bundles_inner(
+    state: &AppState,
+    bundles: Vec<DraftBundleInput>,
+) -> Result<Vec<Value>, AppError> {
+    let mut connection = storage::connect(state)?;
+    for bundle in &bundles {
+        validate_draft_bundle(&connection, bundle)?;
+    }
+
+    let transaction = connection.transaction()?;
+    let saved = bundles
+        .iter()
+        .map(|bundle| insert_draft_bundle(&transaction, bundle))
+        .collect::<Result<Vec<_>, _>>()?;
+    transaction.commit()?;
+    Ok(saved)
 }
 
 #[tauri::command(rename_all = "camelCase")]
@@ -737,32 +899,36 @@ fn request_api_key(
         None => store.load()?.ok_or_else(|| {
             AppError::policy(
                 "OPENAI_API_KEY_REQUIRED",
-                "尚未在 macOS Keychain 中配置 API Key",
+                "尚未在 PaperWeave 中保存 API Key",
             )
         }),
     }
 }
 
 #[tauri::command]
-pub fn open_ai_credential_status() -> Result<Value, AppError> {
-    credential_status_with(&MacOsKeychainStore)
+pub fn open_ai_credential_status(state: State<'_, AppState>) -> Result<Value, AppError> {
+    credential_status_with(&LocalCredentialStore::new(&state))
 }
 
 #[tauri::command(rename_all = "camelCase")]
-pub fn save_open_ai_api_key(api_key: String) -> Result<Value, AppError> {
-    save_api_key_with(&MacOsKeychainStore, &api_key)
+pub fn save_open_ai_api_key(
+    state: State<'_, AppState>,
+    api_key: String,
+) -> Result<Value, AppError> {
+    save_api_key_with(&LocalCredentialStore::new(&state), &api_key)
 }
 
 #[tauri::command]
-pub fn delete_open_ai_api_key() -> Result<Value, AppError> {
-    delete_api_key_with(&MacOsKeychainStore)
+pub fn delete_open_ai_api_key(state: State<'_, AppState>) -> Result<Value, AppError> {
+    delete_api_key_with(&LocalCredentialStore::new(&state))
 }
 
 #[tauri::command(rename_all = "camelCase")]
 pub async fn list_open_ai_models(
+    state: State<'_, AppState>,
     input: ListOpenAiModelsInput,
 ) -> Result<Vec<openai::OpenAiModel>, AppError> {
-    let api_key = request_api_key(input.api_key, &MacOsKeychainStore)?;
+    let api_key = request_api_key(input.api_key, &LocalCredentialStore::new(&state))?;
     openai::list_models(&input.base_url, &api_key).await
 }
 
@@ -941,6 +1107,15 @@ pub async fn generate_drafts(
             "生成 AI Draft 前必须选择至少一个 Evidence Anchor",
         ));
     }
+    if input.anchor_ids.len() > openai::MAX_GENERATION_ANCHORS {
+        return Err(AppError::policy(
+            "OPENAI_ANCHOR_LIMIT",
+            format!(
+                "每次最多选择 {} 个 Evidence Anchor",
+                openai::MAX_GENERATION_ANCHORS
+            ),
+        ));
+    }
     let requested_anchor_ids: HashSet<&String> = input.anchor_ids.iter().collect();
     if requested_anchor_ids.len() != input.anchor_ids.len() {
         return Err(AppError::policy(
@@ -996,33 +1171,417 @@ pub async fn generate_drafts(
         (base_url, model, paper_version_id, anchors, context)
     };
 
-    let api_key = request_api_key(None, &MacOsKeychainStore)?;
+    openai::validate_generation_context(&context)?;
+    let api_key = request_api_key(None, &LocalCredentialStore::new(&state))?;
     let generated = openai::generate_drafts(&base_url, &model, &api_key, &context).await?;
+    persist_generated_drafts(
+        &state,
+        &input.paper_id,
+        &paper_version_id,
+        &anchors,
+        generated,
+    )
+}
+
+fn persist_generated_drafts(
+    state: &AppState,
+    paper_id: &str,
+    paper_version_id: &str,
+    anchors: &HashMap<String, Value>,
+    generated: openai::GeneratedDrafts,
+) -> Result<Value, AppError> {
     if generated.drafts.is_empty() {
         return Err(AppError::policy(
             "OPENAI_DRAFTS_EMPTY",
             "模型没有返回任何 Draft；未写入本地工作区",
         ));
     }
+    if generated.drafts.len() > MAX_OPENAI_DRAFTS {
+        return Err(AppError::policy(
+            "OPENAI_DRAFT_LIMIT",
+            format!("模型最多可返回 {MAX_OPENAI_DRAFTS} 条 Draft；未写入本地工作区"),
+        ));
+    }
     let model_run_id = uuid::Uuid::new_v4().to_string();
     let bundles = generated
         .drafts
         .into_iter()
-        .map(|draft| {
-            generated_bundle(
-                draft,
-                &input.paper_id,
-                &paper_version_id,
-                &model_run_id,
-                &anchors,
-            )
-        })
+        .map(|draft| generated_bundle(draft, paper_id, paper_version_id, &model_run_id, anchors))
         .collect::<Result<Vec<_>, _>>()?;
-    let mut saved = Vec::with_capacity(bundles.len());
-    for bundle in bundles {
-        saved.push(save_draft_bundle_inner(&state, bundle)?);
-    }
+    let saved = save_draft_bundles_inner(state, bundles)?;
     Ok(json!({"modelRunId": model_run_id, "bundles": saved}))
+}
+
+fn paper_map_kind_allowed(kind: &str) -> bool {
+    matches!(
+        kind,
+        "front_matter"
+            | "title"
+            | "author"
+            | "email"
+            | "abstract"
+            | "section_heading"
+            | "paragraph"
+            | "list"
+            | "figure_caption"
+            | "table_caption"
+            | "equation"
+            | "reference"
+    )
+}
+
+fn paper_map_evidence_kind(kind: &str) -> bool {
+    matches!(
+        kind,
+        "abstract" | "paragraph" | "list" | "figure_caption" | "table_caption" | "equation"
+    )
+}
+
+fn paper_map_context_blocks(index: &LocalDocumentIndexInput) -> Vec<openai::PaperMapContextBlock> {
+    index
+        .blocks
+        .iter()
+        .filter(|block| paper_map_evidence_kind(&block.kind))
+        .map(|block| openai::PaperMapContextBlock {
+            id: block.id.clone(),
+            page: block.page,
+            kind: block.kind.clone(),
+            section_path: block.section_path.clone(),
+            text: block.text.clone(),
+        })
+        .collect()
+}
+
+fn validate_document_index(index: &LocalDocumentIndexInput) -> Result<(), AppError> {
+    if index.parser_version != PAPER_MAP_PARSER_VERSION {
+        return Err(AppError::policy(
+            "PAPER_MAP_PARSER_VERSION_INVALID",
+            format!("全文索引必须由 {PAPER_MAP_PARSER_VERSION} 生成"),
+        ));
+    }
+    if !is_sha256(&index.pdf_sha256) {
+        return Err(AppError::policy(
+            "PAPER_MAP_PDF_HASH_INVALID",
+            "全文索引缺少有效的 PDF SHA-256",
+        ));
+    }
+    if index.page_count == 0 || index.page_count > MAX_PAPER_MAP_PAGES {
+        return Err(AppError::policy(
+            "PAPER_MAP_PAGE_LIMIT",
+            format!("论证地图支持 1–{MAX_PAPER_MAP_PAGES} 页的 PDF"),
+        ));
+    }
+    if index.blocks.is_empty() || index.blocks.len() > MAX_PAPER_MAP_BLOCKS {
+        return Err(AppError::policy(
+            "PAPER_MAP_BLOCK_LIMIT",
+            format!("全文索引必须包含 1–{MAX_PAPER_MAP_BLOCKS} 个 Block"),
+        ));
+    }
+    let mut ids = HashSet::with_capacity(index.blocks.len());
+    let mut total_chars = 0_usize;
+    let mut evidence_blocks = 0_usize;
+    for block in &index.blocks {
+        if block.id.trim().is_empty() || !ids.insert(block.id.as_str()) {
+            return Err(AppError::policy(
+                "PAPER_MAP_BLOCK_ID_INVALID",
+                "全文 Block id 不能为空或重复",
+            ));
+        }
+        if block.page == 0 || block.page > index.page_count {
+            return Err(AppError::policy(
+                "PAPER_MAP_BLOCK_PAGE_INVALID",
+                format!("Block {} 的页码不在 PDF 范围内", block.id),
+            ));
+        }
+        if !paper_map_kind_allowed(&block.kind) {
+            return Err(AppError::policy(
+                "PAPER_MAP_BLOCK_KIND_INVALID",
+                format!("Block {} 的 kind 无效", block.id),
+            ));
+        }
+        if block
+            .bbox
+            .iter()
+            .any(|value| !value.is_finite() || !(0.0..=1.0).contains(value))
+            || block.bbox[0] >= block.bbox[2]
+            || block.bbox[1] >= block.bbox[3]
+        {
+            return Err(AppError::policy(
+                "PAPER_MAP_BLOCK_BBOX_INVALID",
+                format!("Block {} 的 bbox 无效", block.id),
+            ));
+        }
+        let text_chars = block.text.trim().chars().count();
+        if text_chars == 0 || text_chars > MAX_PAPER_MAP_BLOCK_CHARS {
+            return Err(AppError::policy(
+                "PAPER_MAP_BLOCK_TEXT_INVALID",
+                format!("Block {} 的文本为空或超过单块上限", block.id),
+            ));
+        }
+        if block.section_path.len() > 8
+            || block
+                .section_path
+                .iter()
+                .any(|section| section.trim().is_empty() || section.chars().count() > 200)
+        {
+            return Err(AppError::policy(
+                "PAPER_MAP_SECTION_PATH_INVALID",
+                format!("Block {} 的 sectionPath 无效", block.id),
+            ));
+        }
+        total_chars += text_chars;
+        if total_chars > MAX_PAPER_MAP_TEXT_CHARS {
+            return Err(AppError::policy(
+                "PAPER_MAP_TEXT_LIMIT",
+                format!("全文 Block 文本超过 {MAX_PAPER_MAP_TEXT_CHARS} 字符上限"),
+            ));
+        }
+        if paper_map_evidence_kind(&block.kind) {
+            evidence_blocks += 1;
+        }
+    }
+    if evidence_blocks == 0 {
+        return Err(AppError::policy(
+            "PAPER_MAP_EVIDENCE_BLOCK_REQUIRED",
+            "全文索引没有可作为论证证据的正文 Block",
+        ));
+    }
+    Ok(())
+}
+
+fn normalized_sha256(value: &str) -> &str {
+    value.strip_prefix("sha256:").unwrap_or(value)
+}
+
+fn paper_version_sha256<'a>(paper: &'a Value, paper_version_id: &str) -> Result<&'a str, AppError> {
+    paper
+        .get("versions")
+        .and_then(Value::as_array)
+        .and_then(|versions| {
+            versions
+                .iter()
+                .find(|version| version.get("id").and_then(Value::as_str) == Some(paper_version_id))
+        })
+        .and_then(|version| version.get("pdfSha256"))
+        .and_then(Value::as_str)
+        .ok_or_else(|| {
+            AppError::policy("PAPER_MAP_PDF_VERSION_INVALID", "当前论文版本缺少 PDF 指纹")
+        })
+}
+
+fn map_node_kind_allowed(kind: &str) -> bool {
+    matches!(
+        kind,
+        "problem" | "background" | "method" | "result" | "limitation" | "conclusion"
+    )
+}
+
+fn persist_generated_paper_map(
+    state: &AppState,
+    paper_id: &str,
+    paper_version_id: &str,
+    model: &str,
+    index: &LocalDocumentIndexInput,
+    generated: openai::GeneratedPaperMap,
+) -> Result<Value, AppError> {
+    if !(5..=8).contains(&generated.nodes.len()) {
+        return Err(AppError::policy(
+            "PAPER_MAP_NODE_LIMIT",
+            "模型必须返回 5–8 个论证地图节点；未写入本地工作区",
+        ));
+    }
+    let blocks = index
+        .blocks
+        .iter()
+        .map(|block| (block.id.as_str(), block))
+        .collect::<HashMap<_, _>>();
+    let mut nodes = Vec::with_capacity(generated.nodes.len());
+    for generated_node in generated.nodes {
+        let title = generated_node.title.trim();
+        let summary = generated_node.summary.trim();
+        if title.is_empty()
+            || title.chars().count() > 160
+            || summary.is_empty()
+            || summary.chars().count() > 1_200
+        {
+            return Err(AppError::policy(
+                "PAPER_MAP_NODE_TEXT_INVALID",
+                "地图节点标题或解释为空、或超过长度上限；未写入本地工作区",
+            ));
+        }
+        if !map_node_kind_allowed(&generated_node.kind) {
+            return Err(AppError::policy(
+                "PAPER_MAP_NODE_KIND_INVALID",
+                format!(
+                    "地图节点 kind {} 无效；未写入本地工作区",
+                    generated_node.kind
+                ),
+            ));
+        }
+        if !(1..=3).contains(&generated_node.evidence_groups.len()) {
+            return Err(AppError::policy(
+                "PAPER_MAP_EVIDENCE_GROUP_LIMIT",
+                "每个地图节点必须包含 1–3 个证据组；未写入本地工作区",
+            ));
+        }
+        let mut evidence_groups = Vec::with_capacity(generated_node.evidence_groups.len());
+        for group in generated_node.evidence_groups {
+            let label = group.label.trim();
+            if label.is_empty() || label.chars().count() > 160 {
+                return Err(AppError::policy(
+                    "PAPER_MAP_EVIDENCE_LABEL_INVALID",
+                    "证据组标签为空或超过长度上限；未写入本地工作区",
+                ));
+            }
+            if !(1..=3).contains(&group.block_ids.len()) {
+                return Err(AppError::policy(
+                    "PAPER_MAP_EVIDENCE_BLOCK_LIMIT",
+                    "每个证据组必须引用 1–3 个 Block；未写入本地工作区",
+                ));
+            }
+            let unique_ids = group.block_ids.iter().collect::<HashSet<_>>();
+            if unique_ids.len() != group.block_ids.len() {
+                return Err(AppError::policy(
+                    "PAPER_MAP_EVIDENCE_BLOCK_DUPLICATE",
+                    "证据组不能重复引用同一 Block；未写入本地工作区",
+                ));
+            }
+            for block_id in &group.block_ids {
+                let block = blocks.get(block_id.as_str()).ok_or_else(|| {
+                    AppError::policy(
+                        "PAPER_MAP_BLOCK_NOT_FOUND",
+                        format!("模型引用了不存在的 Block {block_id}；未写入本地工作区"),
+                    )
+                })?;
+                if !paper_map_evidence_kind(&block.kind) {
+                    return Err(AppError::policy(
+                        "PAPER_MAP_BLOCK_NOT_EVIDENCE",
+                        format!(
+                            "Block {block_id} 属于 {}，不能作为论证证据；未写入本地工作区",
+                            block.kind
+                        ),
+                    ));
+                }
+            }
+            evidence_groups.push(json!({
+                "id": uuid::Uuid::new_v4().to_string(),
+                "label": label,
+                "blockIds": group.block_ids,
+            }));
+        }
+        nodes.push(json!({
+            "id": uuid::Uuid::new_v4().to_string(),
+            "title": title,
+            "summary": summary,
+            "kind": generated_node.kind,
+            "evidenceGroups": evidence_groups,
+        }));
+    }
+
+    let model_run_id = uuid::Uuid::new_v4().to_string();
+    let artifact = json!({
+        "id": format!("paper-map-{paper_id}"),
+        "schemaVersion": "paper_map.v1",
+        "paperId": paper_id,
+        "paperVersionId": paper_version_id,
+        "pdfSha256": index.pdf_sha256,
+        "parserVersion": index.parser_version,
+        "pageCount": index.page_count,
+        "blockCount": index.blocks.len(),
+        "modelRunId": model_run_id,
+        "model": model,
+        "generatedAt": chrono::Utc::now().to_rfc3339(),
+        "nodes": nodes,
+    });
+    let mut connection = storage::connect(state)?;
+    let transaction = connection.transaction()?;
+    storage::upsert_json(&transaction, "paper_map", paper_id, &artifact)?;
+    storage::audit(
+        &transaction,
+        "PaperMapGenerated",
+        "paper_map",
+        paper_id,
+        &json!({
+            "paperVersionId": paper_version_id,
+            "modelRunId": model_run_id,
+            "model": model,
+            "nodeCount": artifact["nodes"].as_array().map_or(0, Vec::len),
+            "blockCount": index.blocks.len(),
+        }),
+    )?;
+    transaction.commit()?;
+    Ok(artifact)
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub async fn generate_paper_map(
+    state: State<'_, AppState>,
+    input: GeneratePaperMapInput,
+) -> Result<Value, AppError> {
+    if !input.confirmed_full_text_upload {
+        return Err(AppError::policy(
+            "PAPER_MAP_UPLOAD_CONFIRMATION_REQUIRED",
+            "生成论证地图前必须逐篇确认发送本地结构化全文文本",
+        ));
+    }
+    validate_document_index(&input.document_index)?;
+
+    let (base_url, model, context) = {
+        let connection = storage::connect(&state)?;
+        let settings =
+            storage::get_json(&connection, "settings", "workspace")?.ok_or_else(|| {
+                AppError::policy(
+                    "OPENAI_CONFIGURATION_REQUIRED",
+                    "请先在“设置 → 模型与 API”中保存 Base URL 与模型 ID",
+                )
+            })?;
+        let base_url = required_string(&settings, "openAiBaseUrl")?.to_owned();
+        let model = required_string(&settings, "openAiModel")?.to_owned();
+        let paper = storage::get_json(&connection, "paper", &input.paper_id)?.ok_or_else(|| {
+            AppError::policy(
+                "PAPER_NOT_FOUND",
+                format!("本地工作区中不存在论文 {}", input.paper_id),
+            )
+        })?;
+        let current_version_id = required_string(&paper, "currentVersionId")?;
+        if current_version_id != input.paper_version_id {
+            return Err(AppError::policy(
+                "PAPER_MAP_PAPER_VERSION_MISMATCH",
+                "全文索引不属于当前论文版本；请重新建立本地索引",
+            ));
+        }
+        let stored_pdf_sha256 = paper_version_sha256(&paper, current_version_id)?;
+        if normalized_sha256(stored_pdf_sha256)
+            != normalized_sha256(&input.document_index.pdf_sha256)
+        {
+            return Err(AppError::policy(
+                "PAPER_MAP_PDF_MISMATCH",
+                "全文索引的 PDF 指纹与当前论文不一致",
+            ));
+        }
+        let context = openai::PaperMapGenerationContext {
+            blocks: paper_map_context_blocks(&input.document_index),
+        };
+        (base_url, model, context)
+    };
+
+    let api_key = request_api_key(None, &LocalCredentialStore::new(&state))?;
+    let generated = openai::generate_paper_map(
+        &base_url,
+        &model,
+        &api_key,
+        input.confirmed_full_text_upload,
+        &context,
+    )
+    .await?;
+    persist_generated_paper_map(
+        &state,
+        &input.paper_id,
+        &input.paper_version_id,
+        &model,
+        &input.document_index,
+        generated,
+    )
 }
 
 fn contains_secret(value: &Value) -> bool {
@@ -1074,7 +1633,7 @@ fn save_settings_inner(state: &AppState, settings: Value) -> Result<Value, AppEr
     if contains_secret(&settings) {
         return Err(AppError::policy(
             "SECURITY_SECRET_IN_SETTINGS",
-            "设置对象不能包含密钥、令牌或密码明文；请使用系统 Keychain 引用",
+            "工作区设置不能包含密钥、令牌或密码明文；请使用 PaperWeave 的本机 API Key 配置",
         ));
     }
     validate_openai_settings(&settings)?;
@@ -1112,12 +1671,18 @@ mod tests {
 
     use super::{
         contains_secret, credential_status_with, delete_api_key_with, generated_bundle,
+        paper_map_context_blocks, persist_generated_drafts, persist_generated_paper_map,
         request_api_key, required_string, review_draft_inner, save_api_key_with,
-        save_settings_inner, update_paper_metadata_inner, validate_anchor_value,
-        validate_openai_settings, ReviewDraftInput, UpdatePaperMetadataInput,
+        save_draft_bundles_inner, save_settings_inner, snapshot, update_paper_metadata_inner,
+        validate_anchor_value, validate_document_index, validate_openai_settings,
+        DocumentBlockInput, LocalCredentialStore, LocalDocumentIndexInput, ReviewDraftInput,
+        UpdatePaperMetadataInput, PAPER_MAP_PARSER_VERSION,
     };
     use crate::error::AppError;
-    use crate::openai::{CredentialStore, GeneratedDraft, CREDENTIAL_REF};
+    use crate::openai::{
+        CredentialStore, GeneratedDraft, GeneratedDrafts, GeneratedPaperMap,
+        GeneratedPaperMapEvidenceGroup, GeneratedPaperMapNode, CREDENTIAL_REF,
+    };
     use crate::storage::{self, AppState};
     use serde_json::json;
 
@@ -1165,6 +1730,71 @@ mod tests {
         fs::remove_dir_all(root).unwrap();
     }
 
+    fn generated_draft(claim_text: &str) -> GeneratedDraft {
+        GeneratedDraft {
+            claim_text: claim_text.to_owned(),
+            claim_type: "empirical".to_owned(),
+            epistemic_source: "reported_result".to_owned(),
+            anchor_ids: vec!["anchor-1".to_owned()],
+            relation: "support".to_owned(),
+            support_type: "reported_result".to_owned(),
+            assumptions: vec![],
+            scope_conditions: vec![],
+            limitations: vec![],
+            confidence: 0.8,
+            confidence_basis: vec!["Selected evidence".to_owned()],
+            needs_human_attention: false,
+        }
+    }
+
+    fn generation_anchor() -> serde_json::Value {
+        json!({
+            "id": "anchor-1",
+            "paperVersionId": "version-1",
+            "pageIndex": 0,
+            "selectedText": "A selected reported result."
+        })
+    }
+
+    fn document_block(id: &str, kind: &str) -> DocumentBlockInput {
+        DocumentBlockInput {
+            id: id.to_owned(),
+            page: 1,
+            bbox: [0.1, 0.2, 0.8, 0.24],
+            kind: kind.to_owned(),
+            section_path: vec!["Results".to_owned()],
+            text: format!("Structured text for {id}."),
+        }
+    }
+
+    fn document_index() -> LocalDocumentIndexInput {
+        LocalDocumentIndexInput {
+            pdf_sha256: format!("sha256:{}", "b".repeat(64)),
+            parser_version: PAPER_MAP_PARSER_VERSION.to_owned(),
+            page_count: 1,
+            blocks: vec![document_block("p0001-b0001", "paragraph")],
+        }
+    }
+
+    fn generated_paper_map(block_id: &str) -> GeneratedPaperMap {
+        let kinds = ["problem", "method", "result", "limitation", "conclusion"];
+        GeneratedPaperMap {
+            nodes: kinds
+                .iter()
+                .enumerate()
+                .map(|(index, kind)| GeneratedPaperMapNode {
+                    title: format!("Map node {index}"),
+                    summary: "An explanatory argument-map node.".to_owned(),
+                    kind: (*kind).to_owned(),
+                    evidence_groups: vec![GeneratedPaperMapEvidenceGroup {
+                        label: "Local evidence".to_owned(),
+                        block_ids: vec![block_id.to_owned()],
+                    }],
+                })
+                .collect(),
+        }
+    }
+
     #[test]
     fn settings_reject_plaintext_secrets_but_allow_references() {
         assert!(contains_secret(&json!({"apiKey": "sk-secret"})));
@@ -1172,7 +1802,7 @@ mod tests {
             &json!({"nested": {"accessToken": "secret"}})
         ));
         assert!(!contains_secret(&json!({
-            "credentialRef": "keychain://paperweave/profile-id",
+            "credentialRef": "paperweave-local://openai-compatible",
             "cloudMetadataEnabled": false
         })));
         assert!(validate_openai_settings(&json!({
@@ -1210,6 +1840,32 @@ mod tests {
     }
 
     #[test]
+    fn local_credential_survives_new_store_instances_until_user_deletes_it() {
+        let state = test_state();
+        save_api_key_with(&LocalCredentialStore::new(&state), "persistent-test-secret").unwrap();
+
+        let reopened_store = LocalCredentialStore::new(&state);
+        assert_eq!(
+            credential_status_with(&reopened_store).unwrap(),
+            json!({"configured": true, "credentialRef": CREDENTIAL_REF})
+        );
+        assert_eq!(
+            request_api_key(None, &reopened_store).unwrap(),
+            "persistent-test-secret"
+        );
+        let workspace_snapshot = serde_json::to_string(&snapshot(&state).unwrap()).unwrap();
+        assert!(!workspace_snapshot.contains("persistent-test-secret"));
+        assert!(!workspace_snapshot.contains("local_credential"));
+
+        delete_api_key_with(&reopened_store).unwrap();
+        assert_eq!(
+            credential_status_with(&LocalCredentialStore::new(&state)).unwrap(),
+            json!({"configured": false, "credentialRef": null})
+        );
+        remove_test_state(&state);
+    }
+
+    #[test]
     fn model_settings_persist_only_ordinary_fields_and_credential_reference() {
         let state = test_state();
         let settings = json!({
@@ -1234,27 +1890,9 @@ mod tests {
 
     #[test]
     fn generated_ai_draft_keeps_model_run_and_selected_anchor() {
-        let anchor = json!({
-            "id": "anchor-1",
-            "paperVersionId": "version-1",
-            "pageIndex": 0,
-            "selectedText": "A selected reported result."
-        });
+        let anchor = generation_anchor();
         let anchors = HashMap::from([("anchor-1".to_owned(), anchor)]);
-        let generated = GeneratedDraft {
-            claim_text: "The evidence supports a reviewable result.".to_owned(),
-            claim_type: "empirical".to_owned(),
-            epistemic_source: "reported_result".to_owned(),
-            anchor_ids: vec!["anchor-1".to_owned()],
-            relation: "support".to_owned(),
-            support_type: "reported_result".to_owned(),
-            assumptions: vec![],
-            scope_conditions: vec![],
-            limitations: vec![],
-            confidence: 0.8,
-            confidence_basis: vec!["Selected evidence".to_owned()],
-            needs_human_attention: false,
-        };
+        let generated = generated_draft("The evidence supports a reviewable result.");
 
         let bundle =
             generated_bundle(generated, "paper-1", "version-1", "run-1", &anchors).unwrap();
@@ -1262,6 +1900,92 @@ mod tests {
         assert_eq!(bundle.draft["reviewStatus"], "draft");
         assert_eq!(bundle.draft["modelRunId"], "run-1");
         assert_eq!(bundle.evidence_links[0]["anchorId"], "anchor-1");
+    }
+
+    #[test]
+    fn more_than_three_generated_drafts_write_nothing() {
+        let state = test_state();
+        let anchors = HashMap::from([("anchor-1".to_owned(), generation_anchor())]);
+        let result = persist_generated_drafts(
+            &state,
+            "paper-1",
+            "version-1",
+            &anchors,
+            GeneratedDrafts {
+                drafts: (1..=4)
+                    .map(|index| generated_draft(&format!("Reviewable result number {index}.")))
+                    .collect(),
+            },
+        );
+
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .starts_with("OPENAI_DRAFT_LIMIT:"));
+        let connection = storage::connect(&state).unwrap();
+        assert!(storage::list_json(&connection, "draft").unwrap().is_empty());
+        assert!(storage::list_json(&connection, "evidence_link")
+            .unwrap()
+            .is_empty());
+        let audit_count: i64 = connection
+            .query_row("SELECT COUNT(*) FROM audit_event", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(audit_count, 0);
+        drop(connection);
+        remove_test_state(&state);
+    }
+
+    #[test]
+    fn ai_bundle_batch_rolls_back_when_second_draft_conflicts() {
+        let state = test_state();
+        let anchor = generation_anchor();
+        let connection = storage::connect(&state).unwrap();
+        storage::insert_json(&connection, "anchor", "anchor-1", &anchor).unwrap();
+        drop(connection);
+        let anchors = HashMap::from([("anchor-1".to_owned(), anchor)]);
+        let first = generated_bundle(
+            generated_draft("First reviewable generated result."),
+            "paper-1",
+            "version-1",
+            "run-1",
+            &anchors,
+        )
+        .unwrap();
+        let mut second = generated_bundle(
+            generated_draft("Second reviewable generated result."),
+            "paper-1",
+            "version-1",
+            "run-1",
+            &anchors,
+        )
+        .unwrap();
+        let conflicting_draft_id = first.draft["id"].as_str().unwrap().to_owned();
+        second.draft["id"] = json!(conflicting_draft_id.clone());
+        second.evidence_links[0]["claimId"] = second.draft["id"].clone();
+        let evidence_link_ids = [
+            first.evidence_links[0]["id"].as_str().unwrap().to_owned(),
+            second.evidence_links[0]["id"].as_str().unwrap().to_owned(),
+        ];
+
+        assert!(save_draft_bundles_inner(&state, vec![first, second]).is_err());
+
+        let connection = storage::connect(&state).unwrap();
+        assert!(
+            storage::get_json(&connection, "draft", &conflicting_draft_id)
+                .unwrap()
+                .is_none()
+        );
+        for link_id in evidence_link_ids {
+            assert!(storage::get_json(&connection, "evidence_link", &link_id)
+                .unwrap()
+                .is_none());
+        }
+        let audit_count: i64 = connection
+            .query_row("SELECT COUNT(*) FROM audit_event", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(audit_count, 0);
+        drop(connection);
+        remove_test_state(&state);
     }
 
     #[test]
@@ -1280,6 +2004,7 @@ mod tests {
             "paperVersionId": "version-1",
             "pageIndex": 0,
             "bboxNorm": [0.1, 0.2, 0.7, 0.3],
+            "rectsNorm": [[0.1, 0.2, 0.4, 0.23], [0.1, 0.25, 0.7, 0.3]],
             "selectedText": "Evidence text",
             "textHash": "a".repeat(64),
             "pdfSha256": format!("sha256:{}", "b".repeat(64)),
@@ -1291,6 +2016,33 @@ mod tests {
         corrupt["bboxNorm"] = json!([0.8, 0.2, 0.1, 0.3]);
         corrupt["textHash"] = json!("not-a-hash");
         assert!(validate_anchor_value(&corrupt).is_err());
+
+        let invalid_rects = json!({
+            "id": "anchor-2",
+            "paperVersionId": "version-1",
+            "pageIndex": 0,
+            "bboxNorm": [0.1, 0.2, 0.7, 0.3],
+            "rectsNorm": [],
+            "selectedText": "Evidence text",
+            "textHash": "a".repeat(64),
+            "pdfSha256": format!("sha256:{}", "b".repeat(64)),
+            "anchorType": "text"
+        });
+        assert!(validate_anchor_value(&invalid_rects).is_err());
+
+        let missing_user_selection_rects = json!({
+            "id": "anchor-3",
+            "paperVersionId": "version-1",
+            "pageIndex": 0,
+            "bboxNorm": [0.1, 0.2, 0.7, 0.3],
+            "selectedText": "Evidence text",
+            "textHash": "a".repeat(64),
+            "pdfSha256": format!("sha256:{}", "b".repeat(64)),
+            "anchorType": "text",
+            "createdBy": "user_selection"
+        });
+        let error = validate_anchor_value(&missing_user_selection_rects).unwrap_err();
+        assert!(error.to_string().contains("ANCHOR_RECTS_REQUIRED"));
     }
 
     #[test]
@@ -1448,6 +2200,124 @@ mod tests {
         .is_err());
         review_draft_inner(&state, input("action-1")).unwrap();
         assert!(review_draft_inner(&state, input("action-2")).is_err());
+        remove_test_state(&state);
+    }
+
+    #[test]
+    fn document_index_rejects_invalid_limits_before_generation() {
+        let mut index = document_index();
+        assert!(validate_document_index(&index).is_ok());
+
+        index.blocks[0].bbox = [0.8, 0.2, 0.1, 0.3];
+        assert!(validate_document_index(&index)
+            .unwrap_err()
+            .to_string()
+            .starts_with("PAPER_MAP_BLOCK_BBOX_INVALID:"));
+    }
+
+    #[test]
+    fn unknown_paper_map_block_id_writes_nothing() {
+        let state = test_state();
+        let result = persist_generated_paper_map(
+            &state,
+            "paper-1",
+            "version-1",
+            "model-a",
+            &document_index(),
+            generated_paper_map("missing-block"),
+        );
+
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .starts_with("PAPER_MAP_BLOCK_NOT_FOUND:"));
+        let connection = storage::connect(&state).unwrap();
+        assert!(storage::list_json(&connection, "paper_map")
+            .unwrap()
+            .is_empty());
+        let audit_count: i64 = connection
+            .query_row("SELECT COUNT(*) FROM audit_event", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(audit_count, 0);
+        drop(connection);
+        remove_test_state(&state);
+    }
+
+    #[test]
+    fn metadata_and_reference_blocks_cannot_become_paper_map_evidence() {
+        for kind in [
+            "front_matter",
+            "title",
+            "author",
+            "email",
+            "section_heading",
+            "reference",
+        ] {
+            let state = test_state();
+            let mut index = document_index();
+            index.blocks.push(document_block("forbidden-block", kind));
+            let result = persist_generated_paper_map(
+                &state,
+                "paper-1",
+                "version-1",
+                "model-a",
+                &index,
+                generated_paper_map("forbidden-block"),
+            );
+
+            assert!(result
+                .unwrap_err()
+                .to_string()
+                .starts_with("PAPER_MAP_BLOCK_NOT_EVIDENCE:"));
+            let connection = storage::connect(&state).unwrap();
+            assert!(storage::list_json(&connection, "paper_map")
+                .unwrap()
+                .is_empty());
+            drop(connection);
+            remove_test_state(&state);
+        }
+    }
+
+    #[test]
+    fn provider_context_contains_only_evidence_blocks_with_local_section_paths() {
+        let mut index = document_index();
+        index
+            .blocks
+            .push(document_block("p0001-b0002", "section_heading"));
+        index.blocks.push(document_block("p0001-b0003", "title"));
+
+        let blocks = paper_map_context_blocks(&index);
+
+        assert_eq!(blocks.len(), 1);
+        assert_eq!(blocks[0].id, "p0001-b0001");
+        assert_eq!(blocks[0].section_path, ["Results"]);
+    }
+
+    #[test]
+    fn valid_paper_map_persists_one_versioned_artifact_and_audit() {
+        let state = test_state();
+        let artifact = persist_generated_paper_map(
+            &state,
+            "paper-1",
+            "version-1",
+            "model-a",
+            &document_index(),
+            generated_paper_map("p0001-b0001"),
+        )
+        .unwrap();
+
+        assert_eq!(artifact["schemaVersion"], "paper_map.v1");
+        assert_eq!(artifact["nodes"].as_array().unwrap().len(), 5);
+        let connection = storage::connect(&state).unwrap();
+        assert_eq!(
+            storage::list_json(&connection, "paper_map").unwrap().len(),
+            1
+        );
+        let audit_count: i64 = connection
+            .query_row("SELECT COUNT(*) FROM audit_event", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(audit_count, 1);
+        drop(connection);
         remove_test_state(&state);
     }
 }

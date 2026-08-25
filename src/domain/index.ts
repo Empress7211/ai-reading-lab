@@ -2,6 +2,7 @@ export * from "./counterpoint";
 export * from "./export";
 export * from "./judgment";
 export * from "./pack";
+export * from "./paperMap";
 export * from "./repository";
 export * from "./review";
 export * from "./types";

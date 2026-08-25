@@ -15,18 +15,34 @@ import type {
   TextContent,
 } from 'pdfjs-dist/types/src/display/api';
 import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
-import type { EvidenceAnchor } from '../domain';
-import { validateAnchor } from '../domain';
+import type {
+  EvidenceAnchor,
+  LocalDocumentIndex,
+  NormalizedBoundingBox,
+  PageTextLine,
+  PageTextRun,
+} from '../domain';
+import {
+  buildDocumentBlocks,
+  DOCUMENT_BLOCK_PARSER_VERSION,
+  extractPageTextLines,
+  validateAnchor,
+} from '../domain';
 import 'pdfjs-dist/web/pdf_viewer.css';
 
 export interface LocalPdfAnchor {
   id: string;
   pageIndex: number;
-  bboxNorm: [number, number, number, number];
+  bboxNorm: NormalizedBoundingBox;
+  rectsNorm?: readonly NormalizedBoundingBox[];
   selectedText: string;
   textHash: string;
   pdfSha256: string;
   createdAt: string;
+  sectionPath?: readonly string[];
+  semanticElementId?: string | null;
+  parserVersion?: string;
+  createdBy?: EvidenceAnchor['createdBy'];
 }
 
 interface LocalPdfViewerProps {
@@ -34,8 +50,10 @@ interface LocalPdfViewerProps {
   anchors?: readonly EvidenceAnchor[];
   expectedPaperVersionId?: string;
   activeAnchorId?: string | null;
-  onAnchorCreate: (anchor: LocalPdfAnchor) => void;
+  activeDocumentBlockId?: string | null;
+  onAnchorCreate: (anchor: LocalPdfAnchor) => Promise<void> | void;
   onAnchorStatesChange?: (states: readonly AnchorLocationState[]) => void;
+  onDocumentIndexChange?: (index: LocalDocumentIndex | null) => void;
 }
 
 export type AnchorLocationStatus =
@@ -56,17 +74,117 @@ export interface AnchorLocationState {
 
 interface PendingSelection {
   pageIndex: number;
-  bboxNorm: [number, number, number, number];
+  bboxNorm: NormalizedBoundingBox;
+  rectsNorm: readonly NormalizedBoundingBox[];
   selectedText: string;
 }
 
-async function sha256(value: ArrayBuffer | string): Promise<string> {
+interface RectBounds {
+  left: number;
+  top: number;
+  right: number;
+  bottom: number;
+}
+
+interface PageRect extends RectBounds {
+  width: number;
+  height: number;
+}
+
+export interface SelectionGeometry {
+  bboxNorm: NormalizedBoundingBox;
+  rectsNorm: readonly NormalizedBoundingBox[];
+}
+
+export function selectionGeometryForPage(
+  pageRect: PageRect,
+  clientRects: readonly RectBounds[],
+): SelectionGeometry | null {
+  if (pageRect.width <= 0 || pageRect.height <= 0) return null;
+  const clamp = (value: number) => Math.max(0, Math.min(1, value));
+  const rectsNorm: NormalizedBoundingBox[] = [];
+  const seen = new Set<string>();
+
+  for (const rect of clientRects) {
+    const left = Math.max(pageRect.left, rect.left);
+    const top = Math.max(pageRect.top, rect.top);
+    const right = Math.min(pageRect.right, rect.right);
+    const bottom = Math.min(pageRect.bottom, rect.bottom);
+    if (right <= left || bottom <= top) continue;
+    const normalized: NormalizedBoundingBox = [
+      clamp((left - pageRect.left) / pageRect.width),
+      clamp((top - pageRect.top) / pageRect.height),
+      clamp((right - pageRect.left) / pageRect.width),
+      clamp((bottom - pageRect.top) / pageRect.height),
+    ];
+    const key = normalized.map((value) => value.toFixed(6)).join(':');
+    if (!seen.has(key)) {
+      seen.add(key);
+      rectsNorm.push(normalized);
+    }
+  }
+
+  if (rectsNorm.length === 0) return null;
+  let [x0, y0, x1, y1] = rectsNorm[0]!;
+  for (const [rectX0, rectY0, rectX1, rectY1] of rectsNorm.slice(1)) {
+    x0 = Math.min(x0, rectX0);
+    y0 = Math.min(y0, rectY0);
+    x1 = Math.max(x1, rectX1);
+    y1 = Math.max(y1, rectY1);
+  }
+  return { bboxNorm: [x0, y0, x1, y1], rectsNorm };
+}
+
+export async function sha256LocalPdfValue(value: ArrayBuffer | string): Promise<string> {
   const input =
     typeof value === 'string' ? new TextEncoder().encode(value).buffer : value;
   const digest = await crypto.subtle.digest('SHA-256', input);
   return Array.from(new Uint8Array(digest))
     .map((byte) => byte.toString(16).padStart(2, '0'))
     .join('');
+}
+
+interface StableViewport {
+  width: number;
+  height: number;
+  scale: number;
+  transform: readonly number[];
+}
+
+function multiplyTransforms(left: readonly number[], right: readonly number[]): number[] {
+  return [
+    left[0]! * right[0]! + left[2]! * right[1]!,
+    left[1]! * right[0]! + left[3]! * right[1]!,
+    left[0]! * right[2]! + left[2]! * right[3]!,
+    left[1]! * right[2]! + left[3]! * right[3]!,
+    left[0]! * right[4]! + left[2]! * right[5]! + left[4]!,
+    left[1]! * right[4]! + left[3]! * right[5]! + left[5]!,
+  ];
+}
+
+function textRunsForPage(textContent: TextContent, viewport: StableViewport): PageTextRun[] {
+  const runs: PageTextRun[] = [];
+  for (const item of textContent.items) {
+    if (!('str' in item) || !item.str) continue;
+    const transform = multiplyTransforms(viewport.transform, item.transform);
+    const fontHeight = Math.max(0.5, Math.hypot(transform[2]!, transform[3]!));
+    const width = Math.max(0.5, Math.abs(item.width * viewport.scale));
+    const left = transform[4]!;
+    const baseline = transform[5]!;
+    const clamp = (value: number) => Math.max(0, Math.min(1, value));
+    runs.push({
+      text: item.str,
+      bbox: [
+        clamp(left / viewport.width),
+        clamp((baseline - fontHeight) / viewport.height),
+        clamp((left + width) / viewport.width),
+        clamp(baseline / viewport.height),
+      ],
+      fontSize: fontHeight / viewport.height,
+      hasEol: item.hasEOL,
+    });
+  }
+  return runs;
 }
 
 function normalizedHash(value: string): string {
@@ -147,18 +265,23 @@ export function classifyAnchorForPdf(
 }
 
 function ignoreAnchorStates(): void {}
+function ignoreDocumentIndex(): void {}
 
 export function LocalPdfViewer({
   file,
   anchors = [],
   expectedPaperVersionId = '',
   activeAnchorId = null,
+  activeDocumentBlockId = null,
   onAnchorCreate,
   onAnchorStatesChange = ignoreAnchorStates,
+  onDocumentIndexChange = ignoreDocumentIndex,
 }: LocalPdfViewerProps) {
   const viewerRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const hostRef = useRef<HTMLDivElement>(null);
+  const documentIndexRef = useRef<LocalDocumentIndex | null>(null);
+  const indexedFileRef = useRef<File | null>(null);
   const [status, setStatus] = useState('正在校验并打开本地 PDF…');
   const [error, setError] = useState<string | null>(null);
   const [pdfHash, setPdfHash] = useState('');
@@ -194,6 +317,11 @@ export function LocalPdfViewer({
     setPending(null);
     setError(null);
     setStatus('正在校验并打开本地 PDF…');
+    if (indexedFileRef.current !== file) {
+      indexedFileRef.current = file;
+      documentIndexRef.current = null;
+      onDocumentIndexChange(null);
+    }
 
     async function openPdf() {
       const arrayBuffer = await file.arrayBuffer();
@@ -204,7 +332,7 @@ export function LocalPdfViewer({
 
       const [pdfjs, hash] = await Promise.all([
         import('pdfjs-dist'),
-        sha256(arrayBuffer),
+        sha256LocalPdfValue(arrayBuffer),
       ]);
       if (canceled) return;
 
@@ -214,10 +342,13 @@ export function LocalPdfViewer({
       const pdf = await loadingTask.promise;
       setPageCount(pdf.numPages);
       setCurrentPage(1);
-      setStatus(`已打开 ${pdf.numPages} 页 · 本地文件未上传`);
+      setStatus(`正在本地建立全文索引 0 / ${pdf.numPages} 页…`);
+      const documentLines: PageTextLine[][] = [];
+      let renderChain = Promise.resolve();
 
       for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
         if (canceled) return;
+        setStatus(`正在本地建立全文索引 ${pageNumber} / ${pdf.numPages} 页…`);
         const page = await pdf.getPage(pageNumber);
         const baseViewport = page.getViewport({ scale: 1 });
         const fitWidth = Math.max(320, Math.min(820, viewerWidth - 72));
@@ -256,7 +387,13 @@ export function LocalPdfViewer({
           const message = reason instanceof Error ? reason.message : String(reason);
           throw new Error(`第 ${pageNumber} 页文本提取失败：${message}`);
         });
-        const canvasRender = page.render({
+        documentLines.push(extractPageTextLines(
+          pageNumber,
+          textRunsForPage(textContent, baseViewport),
+        ));
+        renderChain = renderChain.then(async () => {
+          if (canceled) return;
+          const canvasRender = page.render({
             canvas,
             canvasContext: context,
             viewport,
@@ -268,22 +405,23 @@ export function LocalPdfViewer({
             const message = reason instanceof Error ? reason.message : String(reason);
             throw new Error(`第 ${pageNumber} 页画布渲染失败：${message}`);
           });
-        let textLayerRenderer: InstanceType<typeof pdfjs.TextLayer>;
-        try {
-          textLayerRenderer = new pdfjs.TextLayer({
-            textContentSource: textContent,
-            container: textLayer,
-            viewport,
-          });
-        } catch (reason) {
-          const message = reason instanceof Error ? reason.message : String(reason);
-          throw new Error(`第 ${pageNumber} 页文本层初始化失败：${message}`);
-        }
-        const textRender = textLayerRenderer.render().catch((reason: unknown) => {
+          let textLayerRenderer: InstanceType<typeof pdfjs.TextLayer>;
+          try {
+            textLayerRenderer = new pdfjs.TextLayer({
+              textContentSource: textContent,
+              container: textLayer,
+              viewport,
+            });
+          } catch (reason) {
             const message = reason instanceof Error ? reason.message : String(reason);
-            throw new Error(`第 ${pageNumber} 页文本层渲染失败：${message}`);
+            throw new Error(`第 ${pageNumber} 页文本层初始化失败：${message}`);
+          }
+          const textRender = textLayerRenderer.render().catch((reason: unknown) => {
+              const message = reason instanceof Error ? reason.message : String(reason);
+              throw new Error(`第 ${pageNumber} 页文本层渲染失败：${message}`);
           });
-        await Promise.all([canvasRender, textRender]);
+          await Promise.all([canvasRender, textRender]);
+        });
       }
 
       if (canceled) return;
@@ -299,26 +437,43 @@ export function LocalPdfViewer({
           `.pdf-live-page[data-page-index="${anchor.pageIndex}"]`,
         );
         if (!pageElement) continue;
-        const [x0, y0, x1, y1] = anchor.bboxNorm;
-        const overlay = document.createElement('button');
-        overlay.type = 'button';
-        overlay.className = 'pdf-anchor-overlay';
-        overlay.dataset.anchorId = anchor.id;
-        overlay.setAttribute('aria-label', `Evidence Anchor：${anchor.selectedText}`);
-        overlay.title = `第 ${anchor.pageIndex + 1} 页 · ${anchor.selectedText}`;
-        overlay.style.left = `${x0 * 100}%`;
-        overlay.style.top = `${y0 * 100}%`;
-        overlay.style.width = `${(x1 - x0) * 100}%`;
-        overlay.style.height = `${(y1 - y0) * 100}%`;
-        pageElement.append(overlay);
+        const fragments = anchor.rectsNorm?.length ? anchor.rectsNorm : [anchor.bboxNorm];
+        for (const [fragmentIndex, [x0, y0, x1, y1]] of fragments.entries()) {
+          const overlay = document.createElement('button');
+          overlay.type = 'button';
+          overlay.className = `pdf-anchor-overlay${fragmentIndex === 0 ? ' is-first-fragment' : ''}`;
+          overlay.dataset.anchorId = anchor.id;
+          overlay.dataset.fragmentIndex = String(fragmentIndex);
+          overlay.setAttribute('aria-label', `Evidence Anchor：${anchor.selectedText}`);
+          overlay.title = `第 ${anchor.pageIndex + 1} 页 · ${anchor.selectedText}`;
+          overlay.style.left = `${x0 * 100}%`;
+          overlay.style.top = `${y0 * 100}%`;
+          overlay.style.width = `${(x1 - x0) * 100}%`;
+          overlay.style.height = `${(y1 - y0) * 100}%`;
+          pageElement.append(overlay);
+        }
       }
       onAnchorStatesChange(anchorStates);
+      const documentIndex: LocalDocumentIndex = {
+        pdfSha256: `sha256:${hash}`,
+        parserVersion: DOCUMENT_BLOCK_PARSER_VERSION,
+        pageCount: pdf.numPages,
+        blocks: buildDocumentBlocks(documentLines),
+      };
+      documentIndexRef.current = documentIndex;
+      onDocumentIndexChange(documentIndex);
       setRenderRevision((revision) => revision + 1);
+      setStatus(`全文索引已完成 · 正在渲染 ${pdf.numPages} 页 PDF…`);
+      await renderChain;
+      if (canceled) return;
+      setStatus(`已打开 ${pdf.numPages} 页 · 本地文件未上传`);
     }
 
     void openPdf().catch((reason: unknown) => {
       if (canceled) return;
       const message = reason instanceof Error ? reason.message : '无法打开此 PDF。';
+      documentIndexRef.current = null;
+      onDocumentIndexChange(null);
       setError(message);
       setStatus('PDF 打开失败');
       onAnchorStatesChange(anchors.map((anchor) => ({
@@ -332,7 +487,7 @@ export function LocalPdfViewer({
       canceled = true;
       void loadingTask?.destroy();
     };
-  }, [anchors, expectedPaperVersionId, file, onAnchorStatesChange, viewerWidth, zoom]);
+  }, [anchors, expectedPaperVersionId, file, onAnchorStatesChange, onDocumentIndexChange, viewerWidth, zoom]);
 
   useEffect(() => {
     const host = hostRef.current;
@@ -341,11 +496,37 @@ export function LocalPdfViewer({
       host.querySelectorAll<HTMLElement>('.pdf-anchor-overlay'),
     );
     for (const overlay of overlays) overlay.classList.remove('is-focused');
-    const target = overlays.find((overlay) => overlay.dataset.anchorId === activeAnchorId);
-    if (!target) return;
-    target.classList.add('is-focused');
-    target.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'center' });
+    const targets = overlays.filter((overlay) => overlay.dataset.anchorId === activeAnchorId);
+    if (targets.length === 0) return;
+    for (const target of targets) target.classList.add('is-focused');
+    targets[0]!.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'center' });
   }, [activeAnchorId, renderRevision]);
+
+  useEffect(() => {
+    const host = hostRef.current;
+    if (!host) return;
+    host.querySelector('.pdf-map-evidence-overlay')?.remove();
+    if (!activeDocumentBlockId) return;
+    const block = documentIndexRef.current?.blocks.find(
+      (candidate) => candidate.id === activeDocumentBlockId,
+    );
+    if (!block) return;
+    const pageElement = host.querySelector<HTMLElement>(
+      `.pdf-live-page[data-page-index="${block.page - 1}"]`,
+    );
+    if (!pageElement) return;
+    const [x0, y0, x1, y1] = block.bbox;
+    const overlay = document.createElement('div');
+    overlay.className = 'pdf-map-evidence-overlay';
+    overlay.dataset.blockId = block.id;
+    overlay.setAttribute('aria-hidden', 'true');
+    overlay.style.left = `${x0 * 100}%`;
+    overlay.style.top = `${y0 * 100}%`;
+    overlay.style.width = `${(x1 - x0) * 100}%`;
+    overlay.style.height = `${(y1 - y0) * 100}%`;
+    pageElement.append(overlay);
+    overlay.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'center' });
+  }, [activeDocumentBlockId, renderRevision]);
 
   useEffect(() => {
     const scroller = scrollRef.current;
@@ -389,39 +570,53 @@ export function LocalPdfViewer({
     if (!text) return;
 
     const range = selection.getRangeAt(0);
-    const pageElement =
-      range.commonAncestorContainer.parentElement?.closest<HTMLElement>('.pdf-live-page');
-    if (!pageElement) return;
+    const pageForNode = (node: Node) => {
+      const element = node.nodeType === Node.ELEMENT_NODE ? node as Element : node.parentElement;
+      return element?.closest<HTMLElement>('.pdf-live-page') ?? null;
+    };
+    const pageElement = pageForNode(range.startContainer);
+    const endPageElement = pageForNode(range.endContainer);
+    if (!pageElement || pageElement !== endPageElement) {
+      setPending(null);
+      setError('一次只能在同一页内创建 Evidence Anchor。');
+      return;
+    }
 
     const pageRect = pageElement.getBoundingClientRect();
-    const rect = range.getBoundingClientRect();
-    const clamp = (value: number) => Math.max(0, Math.min(1, value));
+    const geometry = selectionGeometryForPage(pageRect, Array.from(range.getClientRects()));
+    if (!geometry) {
+      setPending(null);
+      setError('无法定位这段文字的逐行选区，请重新选择。');
+      return;
+    }
+    setError(null);
     setPending({
       pageIndex: Number(pageElement.dataset.pageIndex ?? 0),
       selectedText: text,
-      bboxNorm: [
-        clamp((rect.left - pageRect.left) / pageRect.width),
-        clamp((rect.top - pageRect.top) / pageRect.height),
-        clamp((rect.right - pageRect.left) / pageRect.width),
-        clamp((rect.bottom - pageRect.top) / pageRect.height),
-      ],
+      bboxNorm: geometry.bboxNorm,
+      rectsNorm: geometry.rectsNorm,
     });
   }
 
   async function commitSelection() {
     if (!pending || !pdfHash) return;
-    const textHash = await sha256(pending.selectedText);
-    onAnchorCreate({
-      id: crypto.randomUUID(),
-      pageIndex: pending.pageIndex,
-      bboxNorm: pending.bboxNorm,
-      selectedText: pending.selectedText,
-      textHash,
-      pdfSha256: pdfHash,
-      createdAt: new Date().toISOString(),
-    });
-    window.getSelection()?.removeAllRanges();
-    setPending(null);
+    try {
+      const textHash = await sha256LocalPdfValue(pending.selectedText);
+      await onAnchorCreate({
+        id: crypto.randomUUID(),
+        pageIndex: pending.pageIndex,
+        bboxNorm: pending.bboxNorm,
+        rectsNorm: pending.rectsNorm,
+        selectedText: pending.selectedText,
+        textHash,
+        pdfSha256: pdfHash,
+        createdAt: new Date().toISOString(),
+      });
+      window.getSelection()?.removeAllRanges();
+      setPending(null);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Evidence Anchor 保存失败。');
+    }
   }
 
   return (
@@ -433,7 +628,9 @@ export function LocalPdfViewer({
         </div>
         {pending ? (
           <div className="selection-capture" role="toolbar" aria-label="PDF 选区操作">
-            <span>已选择 {pending.selectedText.length} 个字符 · 第 {pending.pageIndex + 1} 页</span>
+            <span>
+              已选择 {pending.selectedText.length} 个字符 · 第 {pending.pageIndex + 1} 页 · {pending.rectsNorm.length} 个文字片段
+            </span>
             <button className="primary-button small-button" onClick={() => void commitSelection()}>
               <Highlighter size={14} />
               创建证据 Anchor

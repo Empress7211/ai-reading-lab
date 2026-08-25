@@ -1,8 +1,24 @@
-import type { Claim, EvidenceAnchor, PaperMarkdownExport, PaperIdentifier } from "./types";
+import {
+  JUDGMENT_SECTION_KEYS,
+  type Claim,
+  type EvidenceAnchor,
+  type JudgmentSectionKey,
+  type PaperMarkdownExport,
+  type PaperIdentifier,
+} from "./types";
 import { isVerified } from "./review";
 import { assertValidClaim } from "./validation";
 
-export const MARKDOWN_RENDERER_VERSION = 1;
+export const MARKDOWN_RENDERER_VERSION = 2;
+
+const JUDGMENT_SECTION_LABELS: Record<JudgmentSectionKey, string> = {
+  judgment: "核心判断",
+  reasoning: "推理",
+  supportingEvidence: "支持证据",
+  counterEvidence: "反方证据",
+  uncertainties: "仍不确定",
+  nextValidation: "下一步验证",
+};
 
 export class MarkdownExportError extends Error {
   constructor(message: string) {
@@ -86,10 +102,30 @@ function renderClaim(claim: Claim, exportData: PaperMarkdownExport): string[] {
   ].filter((line): line is string => line !== null);
 }
 
+function renderJudgment(exportData: PaperMarkdownExport): string[] {
+  const lines = [
+    "## 我的判断",
+    "",
+    `- 状态: ${exportData.judgment.status === "complete" ? "已完成" : "草稿"}`,
+    "",
+  ];
+
+  for (const key of JUDGMENT_SECTION_KEYS) {
+    const section = exportData.judgment.sections[key];
+    const text = inline(section.text);
+    const claimIds = sorted(section.verifiedClaimIds, (claimId) => claimId);
+    lines.push(`### ${JUDGMENT_SECTION_LABELS[key]}`, "", text || "_未填写_", "");
+    claimIds.forEach((claimId) => lines.push(`- 引用 Verified Claim ID: ${inline(claimId)}`));
+    if (claimIds.length > 0) lines.push("");
+  }
+
+  return lines;
+}
+
 /**
- * Produces only deterministic, reviewed knowledge. It intentionally never
- * renders PDF paths, attachment bytes, PDF hashes, selected text, or parser
- * caches. Evidence is represented by stable page/section metadata only.
+ * Produces deterministic user judgment and reviewed knowledge. It intentionally
+ * never renders PDF paths, attachment bytes, PDF hashes, selected text, or
+ * parser caches. Evidence is represented by stable page/section metadata only.
  */
 export function renderPaperMarkdown(exportData: PaperMarkdownExport): string {
   if (exportData.title.trim().length === 0) {
@@ -113,6 +149,7 @@ export function renderPaperMarkdown(exportData: PaperMarkdownExport): string {
     `- Renderer version: ${MARKDOWN_RENDERER_VERSION}`,
     ...(identifiers.length === 0 ? [] : ["", "## Identifiers", "", ...identifiers.map(identifierLine)]),
     "",
+    ...renderJudgment(exportData),
     "<!-- paperweave:begin verified-claims -->",
     "## Verified Claims",
     "",

@@ -36,6 +36,7 @@ pub fn run() {
             commands::delete_open_ai_api_key,
             commands::list_open_ai_models,
             commands::generate_drafts,
+            commands::generate_paper_map,
         ])
         .run(tauri::generate_context!())
         .expect("PaperWeave failed to start");

@@ -3,8 +3,10 @@ import type {
   EvidenceAnchor,
   EvidenceLink,
   JudgmentNote,
+  LocalDocumentIndex,
   NoteBlock,
   Paper,
+  PaperMapArtifact,
   ReviewAction,
   VerifiedClaim,
 } from '../domain';
@@ -46,6 +48,7 @@ export interface WorkspaceSnapshot {
   verifiedClaims: VerifiedClaim[];
   userNotes: NoteBlock[];
   judgments: JudgmentNote[];
+  paperMaps: PaperMapArtifact[];
   settings: WorkspaceSettings;
 }
 
@@ -106,6 +109,13 @@ export interface GenerateDraftsResult {
   bundles: DraftBundle[];
 }
 
+export interface GeneratePaperMapInput {
+  paperId: string;
+  paperVersionId: string;
+  confirmedFullTextUpload: boolean;
+  documentIndex: LocalDocumentIndex;
+}
+
 export interface OpenAiCredentialStatus {
   configured: boolean;
   credentialRef: string | null;
@@ -139,4 +149,5 @@ export interface WorkspaceRepository {
   deleteOpenAiApiKey(): Promise<OpenAiCredentialStatus>;
   listOpenAiModels(input: ListOpenAiModelsInput): Promise<OpenAiModel[]>;
   generateDrafts(input: GenerateDraftsInput): Promise<GenerateDraftsResult>;
+  generatePaperMap(input: GeneratePaperMapInput): Promise<PaperMapArtifact>;
 }

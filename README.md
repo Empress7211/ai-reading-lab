@@ -18,7 +18,7 @@ Status: **v0.1 unsigned macOS local release**. The complete offline workflow rem
 - Write a six-section user-owned Judgment that can cite only Verified Claims and jump back to the PDF.
 - Export deterministic Markdown from reviewed evidence without exporting the PDF or its local path.
 - Configure an OpenAI-compatible Base URL, API Key, and model ID in Settings.
-- Store the API Key in macOS Keychain while SQLite keeps only the Base URL, model ID, and credential reference.
+- Save the API Key once in PaperWeave's local app configuration so later AI requests can use it without a macOS Keychain prompt; it is excluded from workspace snapshots and exports.
 - Load compatible model IDs from `/models`, or enter one manually.
 - Generate evidence-bound AI Drafts through `/chat/completions`; generated Drafts keep a `modelRunId` and still require human Accept, Edit, or Reject.
 - Build and verify an unsigned local `.app` and `.dmg` without requiring an Apple signing identity.
@@ -75,7 +75,7 @@ Tauri command boundary
   ↓
 Rust
   ├─ SQLite + content-addressed PDF vault
-  ├─ macOS Keychain
+  ├─ local provider configuration
   └─ user-configured OpenAI-compatible endpoint
 ```
 

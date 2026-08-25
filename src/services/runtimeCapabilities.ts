@@ -10,7 +10,7 @@ export type RuntimeTaskId =
   | 'zotero.write'
   | 'git.commit'
   | 'github.push'
-  | 'keychain.secrets'
+  | 'local.provider-credentials'
   | 'docling.parse'
   | 'metadata.cloud';
 
@@ -87,10 +87,10 @@ export function getRuntimeCapabilities(runtime: RuntimeKind = detectRuntimeKind(
         'GitHub push',
         'Remote writes are outside this preview-only build.',
       ),
-      'keychain.secrets': unavailable(
-        'keychain.secrets',
-        'System keychain',
-        'Secrets are neither accepted nor persisted until a native keychain adapter exists.',
+      'local.provider-credentials': unavailable(
+        'local.provider-credentials',
+        'Local provider credentials',
+        'Provider credentials are accepted only by the PaperWeave macOS app.',
       ),
       'docling.parse': unavailable(
         'docling.parse',

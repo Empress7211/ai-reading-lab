@@ -31,7 +31,7 @@
 - 导入 PDF、打开 Zotero 现有附件；
 - PDF 阅读器、目录、搜索、选区；
 - Anchor 与手工结构化笔记；
-- BYOK Profile、Keychain、连接测试；
+- BYOK Profile、PaperWeave 本机持久化、替换/清除与连接测试；
 - 局部 AI 解释/Claim draft；
 - 接受/编辑/驳回；
 - Markdown 本地导出；
@@ -185,7 +185,7 @@ AI 基于选区生成原子 Claim，Schema 校验，用户接受/编辑/驳回�
 - OA 合法获取/手工导入；
 - Zotero 精简写回；
 - 本地 Git Markdown；
-- BYOK/Keychain；
+- BYOK/PaperWeave 本机持久化；
 - 离线阅读；
 - 任务/错误/恢复；
 - 工作区导出。

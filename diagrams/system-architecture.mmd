@@ -11,7 +11,7 @@ flowchart TB
         DB[(SQLite + FTS)]
         Vec[(Pluggable Vector Index)]
         Vault[(Local PDF / Cache References)]
-        Keychain[(OS Keychain)]
+        ProviderConfig[(Local Provider Configuration)]
         Git[Local Git Adapter]
         Zotero[Zotero Local API Adapter]
         Models[LLM Provider Adapter]
@@ -23,7 +23,7 @@ flowchart TB
         Core --> DB
         Core --> Vec
         Core --> Vault
-        Core --> Keychain
+        Core --> ProviderConfig
         Core --> Parser
         Core --> Git
         Core --> Zotero

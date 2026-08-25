@@ -183,6 +183,18 @@ pub fn get_json(
     }
 }
 
+pub fn delete_json(
+    connection: &Connection,
+    entity_type: &str,
+    entity_id: &str,
+) -> Result<(), AppError> {
+    connection.execute(
+        "DELETE FROM entity_json WHERE entity_type = ?1 AND entity_id = ?2",
+        params![entity_type, entity_id],
+    )?;
+    Ok(())
+}
+
 pub fn list_json(connection: &Connection, entity_type: &str) -> Result<Vec<Value>, AppError> {
     let mut statement = connection.prepare(
         "SELECT body FROM entity_json WHERE entity_type = ?1 ORDER BY created_at, entity_id",

@@ -27,8 +27,8 @@ function bundle(index: number): { draft: DraftProposal; link: EvidenceLink } {
     link,
     draft: {
       id, paperId: paper.id, paperVersionId: 'version-1', claimText: `Manual review Claim number ${index}.`,
-      claimType: 'interpretive', epistemicSource: 'author_claim', evidenceLinkIds: [link.id], assumptions: [],
-      scopeConditions: [], limitations: [], confidence: 1, confidenceBasis: ['User-authored'], reviewStatus: 'draft',
+      claimType: 'interpretive', epistemicSource: 'user_judgment', evidenceLinkIds: [link.id], assumptions: [],
+      scopeConditions: [], limitations: [], confidence: null, confidenceBasis: [], reviewStatus: 'draft',
       createdBy: 'user', needsHumanAttention: false, modelRunId: null, userComment: null, version: 1,
       createdAt: '2026-08-05T00:00:00.000Z', updatedAt: '2026-08-05T00:00:00.000Z', reviewedBy: null, reviewedAt: null, originalAiDraft: null,
     },
@@ -43,14 +43,18 @@ function renderReader(
   onReview = vi.fn().mockResolvedValue(undefined),
   openLedger = true,
   onUpdatePaperMetadata = vi.fn().mockResolvedValue(undefined),
+  onRequestAiDraft = vi.fn().mockRejectedValue(new Error('OPENAI_ADAPTER_DEFERRED')),
+  openAiModel = 'model-test',
 ) {
   render(<ReaderPage
     paper={paper} judgment={judgment} verifiedClaims={entries.flatMap((entry) => entry.verifiedClaim ? [entry.verifiedClaim] : [])}
     onBack={() => undefined} onMessage={() => undefined} localPdfFile={null}
     localPdfError="PDF intentionally unavailable in unit test" localAnchors={[anchor]} localPaperVersionId="version-1"
-    persistedReviews={entries} nativeFileDialog={false} persistenceLabel="IndexedDB · 浏览器本地"
+    paperMap={null} stalePaperMap={false}
+    persistedReviews={entries} nativeFileDialog={false} persistenceLabel="IndexedDB · 浏览器本地" openAiModel={openAiModel}
     onImportPdf={() => undefined} onUpdatePaperMetadata={onUpdatePaperMetadata} onAnchorCreate={() => undefined} onCreateManualDraft={async () => undefined}
-    onRequestAiDraft={async () => { throw new Error('OPENAI_ADAPTER_DEFERRED'); }} onReviewDraft={onReview}
+    onGeneratePaperMap={async () => undefined}
+    onRequestAiDraft={onRequestAiDraft} onReviewDraft={onReview}
     onSaveJudgment={async () => undefined} onExportMarkdown={() => undefined}
   />);
   if (openLedger) fireEvent.click(screen.getByRole('tab', { name: /审阅/ }));
@@ -58,6 +62,13 @@ function renderReader(
 }
 
 describe('Reader persisted review UI', () => {
+  it('opens the evidence-bound paper map as the default reader surface', () => {
+    renderReader([], vi.fn().mockResolvedValue(undefined), false);
+
+    expect(screen.getByRole('tab', { name: '地图' })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByText('AI argument map · evidence bound')).toBeInTheDocument();
+  });
+
   it('exposes structured judgment and real document actions without legacy integrations', () => {
     renderReader([], vi.fn().mockResolvedValue(undefined), false);
     fireEvent.click(screen.getByRole('tab', { name: '我的判断' }));
@@ -101,6 +112,40 @@ describe('Reader persisted review UI', () => {
     expect(onReview.mock.calls.map((call) => call[1].action)).toEqual(['accept', 'edit_and_accept', 'reject']);
   });
 
+  it('labels a manual Draft as user-provided without fabricated 100% confidence', () => {
+    const first = bundles[0]!;
+    const entry = { draft: first.draft, evidenceLinks: [first.link], reviewAction: null, verifiedClaim: null };
+    renderReader([entry]);
+    const card = screen.getByText(first.draft.claimText).closest('article');
+    if (!card) throw new Error('Expected manual Claim card');
+
+    expect(within(card).getByText('人工 Draft · 用户判断')).toBeInTheDocument();
+    expect(within(card).getByText('用户提供')).toBeInTheDocument();
+    expect(within(card).queryByText('100%')).not.toBeInTheDocument();
+  });
+
+  it('shows the exact Anchor send scope and configured model beside AI generation', () => {
+    renderReader([], vi.fn().mockResolvedValue(undefined), false, vi.fn().mockResolvedValue(undefined), vi.fn(), 'model-visible');
+    fireEvent.click(screen.getByRole('tab', { name: /证据/ }));
+
+    expect(screen.getByText('发送范围：此 Anchor 的选区文本；模型：model-visible')).toBeInTheDocument();
+  });
+
+  it('shows generation pending state without invoking a provider implementation', async () => {
+    let finish!: () => void;
+    const onRequestAiDraft = vi.fn(() => new Promise<void>((resolve) => { finish = resolve; }));
+    renderReader([], vi.fn().mockResolvedValue(undefined), false, vi.fn().mockResolvedValue(undefined), onRequestAiDraft, '');
+    fireEvent.click(screen.getByRole('tab', { name: /证据/ }));
+    expect(screen.getByText('发送范围：此 Anchor 的选区文本；模型：未配置')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: '生成 AI Draft' }));
+    expect(screen.getByRole('button', { name: '正在生成…' })).toBeDisabled();
+    expect(onRequestAiDraft).toHaveBeenCalledWith(anchor.id);
+
+    finish();
+    await waitFor(() => expect(screen.getByRole('button', { name: '生成 AI Draft' })).toBeEnabled());
+  });
+
   it('restores provenance and keeps the original Edited Draft visible', () => {
     const decisions = [
       { action: 'accept' } as const,
@@ -120,5 +165,25 @@ describe('Reader persisted review UI', () => {
     expect(screen.getByText('Rejected')).toBeInTheDocument();
     expect(screen.getByText('原始 Draft（未改写）')).toBeInTheDocument();
     expect(screen.queryAllByRole('button', { name: '接受' })).toHaveLength(0);
+  });
+
+  it('shows a Tauri string AI Draft error unchanged without creating a Draft', async () => {
+    const error = 'OPENAI_DRAFT_REQUEST_FAILED: provider returned 401 Unauthorized';
+    const onRequestAiDraft = vi.fn().mockRejectedValue(error);
+    renderReader(
+      [],
+      vi.fn().mockResolvedValue(undefined),
+      false,
+      vi.fn().mockResolvedValue(undefined),
+      onRequestAiDraft,
+    );
+
+    fireEvent.click(screen.getByRole('tab', { name: /证据/ }));
+    fireEvent.click(screen.getByRole('button', { name: '生成 AI Draft' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(error);
+    expect(onRequestAiDraft).toHaveBeenCalledWith(anchor.id);
+    fireEvent.click(screen.getByRole('tab', { name: /审阅/ }));
+    expect(screen.getByText('先创建 Evidence Anchor，再写人工 Draft，或使用已配置模型生成待审阅 Draft。')).toBeInTheDocument();
   });
 });

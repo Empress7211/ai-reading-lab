@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { AppShell, type AppView } from './components/AppShell';
 import { CommandPalette } from './components/CommandPalette';
 import { ToastRegion, type ToastMessage } from './components/ToastRegion';
+import { messageFromUnknown } from './errorMessage';
 import type {
   DraftProposal,
   DraftReviewDecision,
@@ -10,7 +11,9 @@ import type {
   EvidenceLink,
   EvidenceRelation,
   JudgmentNote,
+  LocalDocumentIndex,
   Paper,
+  PaperMapArtifact,
   ReviewAction,
   VerifiedClaim,
 } from './domain';
@@ -40,6 +43,8 @@ interface LocalDocument {
   reviewActions: ReviewAction[];
   verifiedClaims: VerifiedClaim[];
   judgment: JudgmentNote;
+  paperMap: PaperMapArtifact | null;
+  stalePaperMap: boolean;
 }
 
 function emptyJudgment(paper: Paper): JudgmentNote {
@@ -59,6 +64,7 @@ function paperDocument(snapshot: WorkspaceSnapshot, paper: Paper): Omit<LocalDoc
   const anchors = snapshot.anchors.filter((anchor) => anchor.paperVersionId === paper.currentVersionId);
   const drafts = snapshot.drafts.filter((draft) => draft.paperId === paper.id);
   const draftIds = new Set(drafts.map((draft) => draft.id));
+  const storedPaperMap = snapshot.paperMaps.find((map) => map.paperId === paper.id) ?? null;
   return {
     paper,
     anchors,
@@ -67,6 +73,8 @@ function paperDocument(snapshot: WorkspaceSnapshot, paper: Paper): Omit<LocalDoc
     reviewActions: snapshot.reviewActions.filter((action) => draftIds.has(action.claimId)),
     verifiedClaims: snapshot.verifiedClaims.filter((claim) => claim.paperId === paper.id),
     judgment: snapshot.judgments.find((item) => item.paperId === paper.id) ?? emptyJudgment(paper),
+    paperMap: storedPaperMap,
+    stalePaperMap: Boolean(storedPaperMap && storedPaperMap.paperVersionId !== paper.currentVersionId),
   };
 }
 
@@ -98,7 +106,7 @@ export default function App() {
       .catch((reason) => {
         if (cancelled) return;
         setWorkspaceStatus('error');
-        pushToast('本地仓库初始化失败', reason instanceof Error ? reason.message : '无法打开本地工作区。');
+        pushToast('本地仓库初始化失败', messageFromUnknown(reason, '无法打开本地工作区。'));
       });
     return () => { cancelled = true; };
   }, [pushToast, repository]);
@@ -140,13 +148,13 @@ export default function App() {
         if (!bytes) throw new Error('论文记录存在，但 PDF 内容文件缺失。');
         file = new File([bytes], `${paper.title}.pdf`, { type: 'application/pdf' });
       } catch (reason) {
-        pdfError = reason instanceof Error ? reason.message : '无法从本地仓库读取 PDF。';
+        pdfError = messageFromUnknown(reason, '无法从本地仓库读取 PDF。');
       }
       setWorkspaceSnapshot(snapshot);
       setLocalDocument({ ...paperDocument(snapshot, paper), file, pdfError });
       setView('reader');
     } catch (reason) {
-      pushToast('论文打开失败', reason instanceof Error ? reason.message : '无法读取本地论文。');
+      pushToast('论文打开失败', messageFromUnknown(reason, '无法读取本地论文。'));
     } finally {
       setOpeningPaperId(null);
     }
@@ -183,36 +191,39 @@ export default function App() {
       setView('reader');
       pushToast('本地 PDF 已导入', '文件与研究数据只保存在当前设备；没有上传。');
     } catch (reason) {
-      pushToast('PDF 导入失败', reason instanceof Error ? reason.message : '无法读取所选文件。');
+      pushToast('PDF 导入失败', messageFromUnknown(reason, '无法读取所选文件。'));
     }
   }, [pushToast, repository]);
 
-  const saveLocalAnchor = (selection: LocalPdfAnchor) => {
+  const saveLocalAnchor = async (selection: LocalPdfAnchor): Promise<void> => {
     const current = localDocument;
-    if (!current?.paper.currentVersionId) return;
+    if (!current?.paper.currentVersionId) throw new Error('没有可用的本地论文版本。');
     const anchor: EvidenceAnchor = {
       id: selection.id,
       paperVersionId: current.paper.currentVersionId,
       pageIndex: selection.pageIndex,
       bboxNorm: selection.bboxNorm,
+      ...(selection.rectsNorm ? { rectsNorm: selection.rectsNorm } : {}),
       selectedText: selection.selectedText,
       prefix: '',
       suffix: '',
       textHash: selection.textHash,
-      sectionPath: [],
-      semanticElementId: null,
+      sectionPath: selection.sectionPath ?? [],
+      semanticElementId: selection.semanticElementId ?? null,
       pdfSha256: selection.pdfSha256.startsWith('sha256:') ? selection.pdfSha256 : `sha256:${selection.pdfSha256}`,
-      parserVersion: 'pdfjs-5.6.205-text-layer',
+      parserVersion: selection.parserVersion ?? 'pdfjs-5.6.205-text-layer',
       anchorType: 'text',
       relocationStatus: 'exact',
-      createdBy: 'user_selection',
+      createdBy: selection.createdBy ?? 'user_selection',
     };
-    void repository.saveAnchor(anchor).then(async (saved) => {
+    try {
+      const saved = await repository.saveAnchor(anchor);
       await refreshOpenDocument(current.paper.id);
       pushToast('Evidence Anchor 已保存', `第 ${saved.pageIndex + 1} 页 · ${saved.selectedText.length} 个字符 · 本机持久化`);
-    }).catch((reason) => {
-      pushToast('Anchor 保存失败', reason instanceof Error ? reason.message : '本地仓库拒绝了此 Anchor。');
-    });
+    } catch (reason) {
+      pushToast('Anchor 保存失败', messageFromUnknown(reason, '本地仓库拒绝了此 Anchor。'));
+      throw reason;
+    }
   };
 
   const updatePaperMetadata = async (input: UpdatePaperMetadataInput) => {
@@ -251,13 +262,13 @@ export default function App() {
       paperVersionId: current.paper.currentVersionId,
       claimText: normalizedText,
       claimType: 'interpretive',
-      epistemicSource: 'author_claim',
+      epistemicSource: 'user_judgment',
       evidenceLinkIds: [linkId],
       assumptions: [],
       scopeConditions: [],
       limitations: [],
-      confidence: 1,
-      confidenceBasis: ['用户根据已保存的 PDF Evidence Anchor 手工创建'],
+      confidence: null,
+      confidenceBasis: [],
       reviewStatus: 'draft',
       createdBy: 'user',
       needsHumanAttention: false,
@@ -281,6 +292,23 @@ export default function App() {
     const result = await repository.generateDrafts({ paperId: current.paper.id, anchorIds: [anchorId] });
     await refreshOpenDocument(current.paper.id);
     pushToast('AI Draft 已生成', `${result.bundles.length} 条 Draft 已进入人工审阅队列。`);
+  };
+
+  const requestPaperMap = async (
+    documentIndex: LocalDocumentIndex,
+    confirmedFullTextUpload: true,
+  ) => {
+    const current = localDocument;
+    const paperVersionId = current?.paper.currentVersionId;
+    if (!current || !paperVersionId) throw new Error('没有可用的本地论文版本。');
+    const map = await repository.generatePaperMap({
+      paperId: current.paper.id,
+      paperVersionId,
+      confirmedFullTextUpload,
+      documentIndex,
+    });
+    await refreshOpenDocument(current.paper.id);
+    pushToast('论证地图已生成', `${map.nodes.length} 个节点已保存；切换阅读目标不会再次调用模型。`);
   };
 
   const reviewLocalDraft = async (draftId: string, decision: DraftReviewDecision) => {
@@ -328,6 +356,7 @@ export default function App() {
       authors: current.paper.authors,
       year: current.paper.year,
       identifiers: current.paper.identifiers,
+      judgment: current.judgment,
       claims: current.verifiedClaims,
       anchors: new Map(current.anchors.map((anchor) => [anchor.id, anchor])),
       evidenceLinks: new Map(current.evidenceLinks.map((link) => [link.id, link])),
@@ -339,7 +368,7 @@ export default function App() {
     download.download = `${current.paper.title.replace(/[^\p{L}\p{N}]+/gu, '-').replace(/^-|-$/g, '') || 'paperweave'}.md`;
     download.click();
     URL.revokeObjectURL(url);
-    pushToast('Markdown 已导出', '只包含 Verified Claims 与可回溯页码，不包含 PDF 原文或文件路径。');
+    pushToast('Markdown 已导出', '包含我的判断与 Verified Claims');
   };
 
   const runtimeLabel = repository.runtime === 'tauri' ? 'Tauri + SQLite · 本机' : 'Web + IndexedDB · 本地';
@@ -399,12 +428,16 @@ export default function App() {
       localPdfError={localDocument.pdfError}
       localAnchors={localDocument.anchors}
       localPaperVersionId={localDocument.paper.currentVersionId}
+      paperMap={localDocument.paperMap}
+      stalePaperMap={localDocument.stalePaperMap}
       persistedReviews={localReviews}
       nativeFileDialog={repository.runtime === 'tauri'}
       persistenceLabel={persistenceLabel}
+      openAiModel={workspaceSnapshot?.settings.openAiModel ?? DEFAULT_WORKSPACE_SETTINGS.openAiModel}
       onImportPdf={(file) => void importLocalPdf(file)}
       onUpdatePaperMetadata={(metadata) => updatePaperMetadata({ paperId: localDocument.paper.id, ...metadata })}
       onAnchorCreate={saveLocalAnchor}
+      onGeneratePaperMap={requestPaperMap}
       onCreateManualDraft={createManualDraft}
       onRequestAiDraft={requestAiDrafts}
       onReviewDraft={reviewLocalDraft}

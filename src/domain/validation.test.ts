@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Claim, DraftProposal, EvidenceAnchor, EvidenceLink } from './types';
-import { validateClaim } from './validation';
+import { validateAnchor, validateClaim } from './validation';
 
 const HASH = 'a'.repeat(64);
 const anchor: EvidenceAnchor = {
@@ -30,6 +30,19 @@ function draft(overrides: Partial<Claim> = {}): DraftProposal {
 }
 
 describe('Claim and Anchor domain policy', () => {
+  it('accepts precise Anchor fragments and rejects malformed fragment geometry', () => {
+    expect(validateAnchor({
+      ...anchor,
+      rectsNorm: [[0.1, 0.1, 0.5, 0.12], [0.1, 0.14, 0.4, 0.16]],
+    })).toEqual({ valid: true, issues: [] });
+
+    const result = validateAnchor({
+      ...anchor,
+      rectsNorm: [[0.6, 0.1, 0.2, 0.12]],
+    });
+    expect(result.issues).toContainEqual(expect.objectContaining({ code: 'ANCHOR_RECTS_INVALID' }));
+  });
+
   it.each(['direct_quote', 'author_claim', 'reported_result', 'external_metadata'] as const)('rejects an unanchored factual %s Claim', (epistemicSource) => {
     const result = validateClaim(draft({ epistemicSource, evidenceLinkIds: [] }), anchors, links);
     expect(result.issues).toContainEqual(expect.objectContaining({ code: 'EVIDENCE_REQUIRED' }));
@@ -42,6 +55,22 @@ describe('Claim and Anchor domain policy', () => {
 
   it('accepts a clearly marked anchored AI inference', () => {
     expect(validateClaim(draft({ epistemicSource: 'ai_inference', needsHumanAttention: true }), anchors, links)).toEqual({ valid: true, issues: [] });
+  });
+
+  it('allows a user Claim to omit confidence and keeps historical user numbers valid', () => {
+    const userClaim = {
+      createdBy: 'user',
+      epistemicSource: 'user_judgment',
+      confidenceBasis: [],
+      modelRunId: null,
+    } as const;
+    expect(validateClaim(draft({ ...userClaim, confidence: null }), anchors, links)).toEqual({ valid: true, issues: [] });
+    expect(validateClaim(draft({ ...userClaim, confidence: 1 }), anchors, links)).toEqual({ valid: true, issues: [] });
+  });
+
+  it('rejects an AI Claim without numeric confidence', () => {
+    const result = validateClaim(draft({ confidence: null }), anchors, links);
+    expect(result.issues).toContainEqual(expect.objectContaining({ code: 'CLAIM_CONFIDENCE_INVALID' }));
   });
 
   it('rejects missing and cross-version Anchors', () => {

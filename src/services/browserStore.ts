@@ -5,7 +5,7 @@ const PDF_STORE = 'pdfs';
 const SNAPSHOT_KEY = 'snapshot';
 
 interface PersistedWorkspace {
-  schemaVersion: 1 | 2;
+  schemaVersion: 1 | 2 | 3;
   snapshot: WorkspaceSnapshot;
 }
 
@@ -62,14 +62,14 @@ export class IndexedDbBrowserStore implements BrowserStore {
       'readonly',
       (store) => store.get(SNAPSHOT_KEY),
     );
-    return record && (record.schemaVersion === 1 || record.schemaVersion === 2)
+    return record && (record.schemaVersion === 1 || record.schemaVersion === 2 || record.schemaVersion === 3)
       ? cloneSnapshot(record.snapshot)
       : null;
   }
 
   async saveSnapshot(snapshot: WorkspaceSnapshot): Promise<void> {
     const record: PersistedWorkspace = {
-      schemaVersion: 2,
+      schemaVersion: 3,
       snapshot: cloneSnapshot(snapshot),
     };
     await this.#request(WORKSPACE_STORE, 'readwrite', (store) =>

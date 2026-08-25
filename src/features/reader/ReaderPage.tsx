@@ -2,11 +2,9 @@ import {
   AlertTriangle,
   ArrowLeft,
   Check,
-  ChevronRight,
   Download,
   Ellipsis,
   FileUp,
-  MapPin,
   PanelLeftClose,
   PanelLeftOpen,
   PanelRightOpen,
@@ -16,16 +14,20 @@ import {
 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Button } from '../../components/Button';
+import { messageFromUnknown } from '../../errorMessage';
 import {
   JUDGMENT_SECTION_KEYS,
   type DraftProposal,
   type DraftReviewDecision,
+  type DocumentBlock,
   type EvidenceAnchor,
   type EvidenceLink,
   type EvidenceRelation,
   type JudgmentNote,
   type JudgmentSectionKey,
+  type LocalDocumentIndex,
   type Paper,
+  type PaperMapArtifact,
   type ReviewAction,
   type VerifiedClaim,
 } from '../../domain';
@@ -34,9 +36,11 @@ import {
   LocalPdfViewer,
   type AnchorLocationState,
   type LocalPdfAnchor,
+  sha256LocalPdfValue,
 } from '../LocalPdfViewer';
+import { PaperMapPanel } from './PaperMapPanel';
 
-export type ReaderTab = 'guide' | 'anchors' | 'ledger' | 'judgment';
+export type ReaderTab = 'map' | 'anchors' | 'ledger' | 'judgment';
 
 export interface PersistedReviewEntry {
   draft: DraftProposal;
@@ -55,12 +59,16 @@ interface ReaderPageProps {
   localPdfError: string | null;
   localAnchors: readonly EvidenceAnchor[];
   localPaperVersionId: string | null;
+  paperMap: PaperMapArtifact | null;
+  stalePaperMap: boolean;
   persistedReviews: readonly PersistedReviewEntry[];
   nativeFileDialog: boolean;
   persistenceLabel: string;
+  openAiModel: string;
   onImportPdf: (file?: File) => void;
   onUpdatePaperMetadata: (metadata: PaperMetadataFormValues) => Promise<void>;
-  onAnchorCreate: (anchor: LocalPdfAnchor) => void;
+  onAnchorCreate: (anchor: LocalPdfAnchor) => Promise<void> | void;
+  onGeneratePaperMap: (documentIndex: LocalDocumentIndex, confirmedFullTextUpload: true) => Promise<void>;
   onCreateManualDraft: (anchorId: string, claimText: string, relation: EvidenceRelation) => Promise<void>;
   onRequestAiDraft: (anchorId: string) => Promise<void>;
   onReviewDraft: (draftId: string, decision: DraftReviewDecision) => Promise<void>;
@@ -75,7 +83,7 @@ export interface PaperMetadataFormValues {
 }
 
 const tabs: Array<[ReaderTab, string]> = [
-  ['guide', '流程'],
+  ['map', '地图'],
   ['anchors', '证据'],
   ['ledger', '审阅'],
   ['judgment', '我的判断'],
@@ -91,24 +99,30 @@ export function ReaderPage({
   localPdfError,
   localAnchors,
   localPaperVersionId,
+  paperMap,
+  stalePaperMap,
   persistedReviews,
   nativeFileDialog,
   persistenceLabel,
+  openAiModel,
   onImportPdf,
   onUpdatePaperMetadata,
   onAnchorCreate,
+  onGeneratePaperMap,
   onCreateManualDraft,
   onRequestAiDraft,
   onReviewDraft,
   onSaveJudgment,
   onExportMarkdown,
 }: ReaderPageProps) {
-  const [tab, setTab] = useState<ReaderTab>('guide');
+  const [tab, setTab] = useState<ReaderTab>('map');
   const [researchOpen, setResearchOpen] = useState(() => window.innerWidth >= 1024);
   const [outlineOpen, setOutlineOpen] = useState(() => window.innerWidth >= 1240);
   const [toolbarMenuOpen, setToolbarMenuOpen] = useState(false);
   const [metadataDialogOpen, setMetadataDialogOpen] = useState(false);
   const [activeAnchor, setActiveAnchor] = useState<string | null>(null);
+  const [activeDocumentBlock, setActiveDocumentBlock] = useState<string | null>(null);
+  const [documentIndex, setDocumentIndex] = useState<LocalDocumentIndex | null>(null);
   const [anchorStates, setAnchorStates] = useState<ReadonlyMap<string, AnchorLocationState>>(() => new Map());
   const fileInputRef = useRef<HTMLInputElement>(null);
   const toolbarMenuRef = useRef<HTMLDivElement>(null);
@@ -122,6 +136,14 @@ export function ReaderPage({
   const updateAnchorStates = useCallback((states: readonly AnchorLocationState[]) => {
     setAnchorStates(new Map(states.map((state) => [state.anchorId, state])));
   }, []);
+  const updateDocumentIndex = useCallback((index: LocalDocumentIndex | null) => {
+    setDocumentIndex(index);
+  }, []);
+
+  useEffect(() => {
+    setDocumentIndex(null);
+    setActiveDocumentBlock(null);
+  }, [paper.id, paper.currentVersionId]);
 
   const stateForAnchor = (anchor: EvidenceAnchor): AnchorLocationState => {
     if (!localPdfFile) {
@@ -147,12 +169,29 @@ export function ReaderPage({
       onMessage('Anchor 无法定位', state.message);
       return;
     }
+    setActiveDocumentBlock(null);
     setActiveAnchor(anchor.id);
   };
 
-  const chooseTab = (nextTab: ReaderTab) => {
-    setTab(nextTab);
-    setResearchOpen(true);
+  const jumpToDocumentBlock = (block: DocumentBlock) => {
+    setActiveAnchor(null);
+    setActiveDocumentBlock(block.id);
+  };
+
+  const includeDocumentBlock = async (block: DocumentBlock, index: LocalDocumentIndex) => {
+    await onAnchorCreate({
+      id: crypto.randomUUID(),
+      pageIndex: block.page - 1,
+      bboxNorm: [...block.bbox],
+      selectedText: block.text,
+      textHash: await sha256LocalPdfValue(block.text),
+      pdfSha256: index.pdfSha256,
+      createdAt: new Date().toISOString(),
+      sectionPath: block.sectionPath,
+      semanticElementId: block.id,
+      parserVersion: index.parserVersion,
+      createdBy: 'parser',
+    });
   };
 
   useEffect(() => {
@@ -209,7 +248,7 @@ export function ReaderPage({
 
       <main className="document-stage has-live-pdf" aria-label="本地 PDF 正文">
         {localPdfFile && localPaperVersionId
-          ? <LocalPdfViewer file={localPdfFile} anchors={localAnchors} expectedPaperVersionId={localPaperVersionId} activeAnchorId={activeAnchor} onAnchorCreate={onAnchorCreate} onAnchorStatesChange={updateAnchorStates} />
+          ? <LocalPdfViewer file={localPdfFile} anchors={localAnchors} expectedPaperVersionId={localPaperVersionId} activeAnchorId={activeAnchor} activeDocumentBlockId={activeDocumentBlock} onAnchorCreate={onAnchorCreate} onAnchorStatesChange={updateAnchorStates} onDocumentIndexChange={updateDocumentIndex} />
           : <div className="reader-error reader-error--document"><AlertTriangle size={20} /><strong>本地 PDF 无法恢复</strong><p>{localPdfError ?? 'PDF 文件缺失；Anchor 与审阅记录仍保留在本地仓库。'}</p></div>}
       </main>
 
@@ -222,8 +261,8 @@ export function ReaderPage({
           </button>)}
         </div>
         <div className="research-content" role="tabpanel" id={`reader-panel-${tab}`} aria-labelledby={`reader-tab-${tab}`}>
-          {tab === 'guide' ? <GuidePanel onChoose={chooseTab} /> : null}
-          {tab === 'anchors' ? <LocalAnchorPanel anchors={localAnchors} stateForAnchor={stateForAnchor} onJump={jumpToLocalAnchor} onCreateManualDraft={onCreateManualDraft} onRequestAiDraft={onRequestAiDraft} draftAnchorIds={draftAnchorIds} /> : null}
+          {tab === 'map' && localPaperVersionId ? <PaperMapPanel paperId={paper.id} paperVersionId={localPaperVersionId} model={openAiModel} documentIndex={documentIndex} paperMap={paperMap} stalePaperMap={stalePaperMap} anchors={localAnchors} onGenerate={onGeneratePaperMap} onJumpBlock={jumpToDocumentBlock} onIncludeBlock={includeDocumentBlock} /> : null}
+          {tab === 'anchors' ? <LocalAnchorPanel anchors={localAnchors} stateForAnchor={stateForAnchor} onJump={jumpToLocalAnchor} onCreateManualDraft={onCreateManualDraft} onRequestAiDraft={onRequestAiDraft} draftAnchorIds={draftAnchorIds} openAiModel={openAiModel} /> : null}
           {tab === 'ledger' ? <PersistedLedgerPanel entries={persistedReviews} anchors={localAnchors} onJump={jumpToLocalAnchor} onReview={onReviewDraft} /> : null}
           {tab === 'judgment' ? <JudgmentPanel judgment={judgment} verifiedClaims={verifiedClaims} persistenceLabel={persistenceLabel} onSave={onSaveJudgment} onJump={(claimId) => {
             const entry = persistedReviews.find((candidate) => candidate.verifiedClaim?.id === claimId);
@@ -284,7 +323,7 @@ function PaperMetadataDialog({
       await onSave({ title: normalizedTitle, authors: normalizedAuthors, year: normalizedYear });
       onClose();
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : '论文信息保存失败。');
+      setError(messageFromUnknown(reason, '论文信息保存失败。'));
     } finally {
       setSaving(false);
     }
@@ -348,18 +387,20 @@ function LocalAnchorList({ anchors, stateForAnchor, onJump, compact = false }: {
   </div>;
 }
 
-function LocalAnchorPanel({ anchors, stateForAnchor, onJump, onCreateManualDraft, onRequestAiDraft, draftAnchorIds }: {
+function LocalAnchorPanel({ anchors, stateForAnchor, onJump, onCreateManualDraft, onRequestAiDraft, draftAnchorIds, openAiModel }: {
   anchors: readonly EvidenceAnchor[];
   stateForAnchor: (anchor: EvidenceAnchor) => AnchorLocationState;
   onJump: (anchor: EvidenceAnchor) => void;
   onCreateManualDraft: (anchorId: string, claimText: string, relation: EvidenceRelation) => Promise<void>;
   onRequestAiDraft: (anchorId: string) => Promise<void>;
   draftAnchorIds: ReadonlySet<string>;
+  openAiModel: string;
 }) {
   const [editingAnchorId, setEditingAnchorId] = useState<string | null>(null);
   const [claimText, setClaimText] = useState('');
   const [relation, setRelation] = useState<EvidenceRelation>('support');
   const [pending, setPending] = useState(false);
+  const [generatingAnchorId, setGeneratingAnchorId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const submit = async (anchorId: string) => {
@@ -371,7 +412,7 @@ function LocalAnchorPanel({ anchors, stateForAnchor, onJump, onCreateManualDraft
       setClaimText('');
       setRelation('support');
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : 'Draft 未保存。');
+      setError(messageFromUnknown(reason, 'Draft 未保存。'));
     } finally {
       setPending(false);
     }
@@ -379,13 +420,15 @@ function LocalAnchorPanel({ anchors, stateForAnchor, onJump, onCreateManualDraft
 
   const requestAi = async (anchorId: string) => {
     setPending(true);
+    setGeneratingAnchorId(anchorId);
     setError(null);
     try {
       await onRequestAiDraft(anchorId);
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : 'AI Draft 不可用。');
+      setError(messageFromUnknown(reason, 'AI Draft 不可用。'));
     } finally {
       setPending(false);
+      setGeneratingAnchorId(null);
     }
   };
 
@@ -399,7 +442,8 @@ function LocalAnchorPanel({ anchors, stateForAnchor, onJump, onCreateManualDraft
         <label><span>与证据关系</span><select value={relation} onChange={(event) => setRelation(event.target.value as EvidenceRelation)}><option value="support">支持</option><option value="counter">反证</option><option value="qualify">限定</option><option value="context">上下文</option></select></label>
         <div><Button size="small" variant="primary" disabled={pending} onClick={() => void submit(anchor.id)}>保存为待审阅 Draft</Button><Button size="small" disabled={pending} onClick={() => setEditingAnchorId(null)}>取消</Button></div>
       </div> : null}
-      <Button size="small" variant="secondary" className="full-width" icon={<Sparkles size={14} />} disabled={pending} onClick={() => void requestAi(anchor.id)}>生成 AI Draft</Button>
+      <p className="ai-request-scope">发送范围：此 Anchor 的选区文本；模型：{openAiModel.trim() || '未配置'}</p>
+      <Button size="small" variant="secondary" className="full-width" icon={<Sparkles size={14} />} disabled={pending} onClick={() => void requestAi(anchor.id)}>{generatingAnchorId === anchor.id ? '正在生成…' : '生成 AI Draft'}</Button>
     </section>)}
     {error ? <p className="inline-error" role="alert">{error}</p> : null}
   </>;
@@ -429,6 +473,9 @@ function PersistedClaimCard({ entry, anchors, onJump, onReview }: { entry: Persi
   const status = entry.reviewAction?.toStatus ?? 'draft';
   const statusLabel = { draft: 'Draft', accepted: 'Verified · accepted', edited: 'Verified · edited', rejected: 'Rejected', stale: 'Stale' }[status];
   const visibleClaim = entry.verifiedClaim ?? entry.draft;
+  const confidenceLabel = entry.draft.confidence === null
+    ? '用户提供'
+    : `${Math.round(entry.draft.confidence * 100)}%`;
 
   const review = async (decision: DraftReviewDecision) => {
     setPending(true);
@@ -437,7 +484,7 @@ function PersistedClaimCard({ entry, anchors, onJump, onReview }: { entry: Persi
       await onReview(entry.draft.id, decision);
       setEditing(false);
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : '审阅动作未保存。');
+      setError(messageFromUnknown(reason, '审阅动作未保存。'));
     } finally {
       setPending(false);
     }
@@ -450,7 +497,7 @@ function PersistedClaimCard({ entry, anchors, onJump, onReview }: { entry: Persi
   };
 
   return <article className={`claim-card is-${status}`}>
-    <header><span>{entry.draft.createdBy === 'ai' ? 'AI Draft' : '人工 Draft'} · {sourceLabels[entry.draft.epistemicSource]}</span><small>{Math.round(entry.draft.confidence * 100)}%</small><strong>{statusLabel}</strong></header>
+    <header><span>{entry.draft.createdBy === 'ai' ? 'AI Draft' : '人工 Draft'} · {sourceLabels[entry.draft.epistemicSource]}</span><small>{confidenceLabel}</small><strong>{statusLabel}</strong></header>
     {editing ? <label className="claim-editor"><span>编辑 Claim 文本</span><textarea value={draftText} onChange={(event) => setDraftText(event.target.value)} autoFocus /></label> : <p className="claim-text">{visibleClaim.claimText}</p>}
     {status === 'edited' ? <p className="original-draft"><strong>原始 Draft（未改写）</strong>{entry.draft.claimText}</p> : null}
     <div className="anchor-chips">{entry.evidenceLinks.map((link) => {
@@ -461,14 +508,6 @@ function PersistedClaimCard({ entry, anchors, onJump, onReview }: { entry: Persi
     {error ? <p className="inline-error" role="alert">{error}</p> : null}
     {!entry.reviewAction ? <footer>{editing ? <><Button size="small" variant="primary" disabled={pending} onClick={saveEdit}>保存编辑并验证</Button><Button size="small" disabled={pending} onClick={() => { setDraftText(entry.draft.claimText); setEditing(false); setError(null); }}>取消</Button></> : <><Button size="small" disabled={pending} onClick={() => void review({ action: 'accept' })} icon={<Check size={14} />}>接受</Button><Button size="small" disabled={pending} onClick={() => setEditing(true)}>编辑</Button><Button size="small" variant="danger" disabled={pending} onClick={() => void review({ action: 'reject', rejectionReason: 'other', reason: '用户在 Reader 审阅中驳回。' })}>驳回</Button></>}</footer> : null}
   </article>;
-}
-
-function GuidePanel({ onChoose }: { onChoose: (tab: ReaderTab) => void }) {
-  return <>
-    <PanelIntro eyebrow="Evidence first · local only" title="从原文到自己的判断。">没有自动写入知识：原文先成为 Anchor，Claim 必须审核，最终判断始终由你完成。</PanelIntro>
-    <section className="guide-card"><header><MapPin size={17} /><h3>唯一工作流</h3></header><ol><li>在 PDF 中选择原文，创建可回跳 Anchor。</li><li>基于 Anchor 写人工 Draft，或请求已配置模型生成 AI Draft。</li><li>逐条接受、编辑或驳回，形成 Verified Claim。</li><li>在“我的判断”中引用 Verified Claim 并完成结论。</li></ol></section>
-    <Button variant="primary" className="full-width" onClick={() => onChoose('anchors')}>开始固定证据 <ChevronRight size={16} /></Button>
-  </>;
 }
 
 const judgmentLabels: Record<JudgmentSectionKey, [string, string]> = {
@@ -507,7 +546,7 @@ function JudgmentPanel({ judgment, verifiedClaims, persistenceLabel, onSave, onJ
     try {
       await onSave({ ...draft, status, updatedAt: now, completedAt: status === 'complete' ? now : null });
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : '“我的判断”未保存。');
+      setError(messageFromUnknown(reason, '“我的判断”未保存。'));
     } finally {
       setPending(false);
     }
