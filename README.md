@@ -2,7 +2,7 @@
 
 PaperWeave is an **evidence-first local PDF reader**. It helps a person turn one paper into a traceable, reviewable judgment—not a general research workspace, knowledge base, or autonomous agent.
 
-Status: **v0.1 unsigned macOS local release**. The complete offline workflow remains usable without an API key. The desktop app also supports an opt-in OpenAI-compatible Draft provider. Developer ID signing and notarization remain deliberately deferred.
+Status: **0.1.0 unsigned macOS local RC (Internal Alpha)**. The complete offline workflow remains usable without an API key. The desktop app also supports opt-in OpenAI-compatible AI features. Developer ID signing and notarization remain deliberately deferred.
 
 ## What works now
 
@@ -21,6 +21,7 @@ Status: **v0.1 unsigned macOS local release**. The complete offline workflow rem
 - Save the API Key once in PaperWeave's local app configuration so later AI requests can use it without a macOS Keychain prompt; it is excluded from workspace snapshots and exports.
 - Load compatible model IDs from `/models`, or enter one manually.
 - Generate evidence-bound AI Drafts through `/chat/completions`; generated Drafts keep a `modelRunId` and still require human Accept, Edit, or Reject.
+- Generate an experimental, single-paper Paper Map after explicitly confirming the structured full-text request; its AI output is unreviewed navigation assistance and cannot create a Verified Claim or Judgment.
 - Build and verify an unsigned local `.app` and `.dmg` without requiring an Apple signing identity.
 
 No fake AI result is generated at runtime. Provider, transport, JSON, or validation failures create no Draft and are shown explicitly; the manual workflow remains available. Browser development mode does not accept or store API keys.
@@ -62,7 +63,7 @@ pnpm run release:build:macos
 pnpm run release:verify:macos
 ```
 
-The release commands intentionally use unsigned local-RC mode. Apple signing is not needed for development or local acceptance and can be added only when distribution requires it.
+The release commands intentionally produce unsigned RC artifacts for local/internal acceptance. Apple signing is not needed for development or internal acceptance and can be added only when distribution requires it.
 
 ## Architecture kept as the product base
 

@@ -55,6 +55,19 @@ describe('TauriWorkspaceRepository', () => {
     expect(invoke).toHaveBeenCalledWith('update_paper_metadata', { input });
   });
 
+  it('sends only the draft id and user decision to the native review command', async () => {
+    const action = { id: 'review-1', claimId: 'draft-1', toStatus: 'edited' };
+    const invoke = vi.fn().mockResolvedValue(action);
+    const repository = new TauriWorkspaceRepository(invoke);
+    const input = {
+      draftId: 'draft-1',
+      decision: { action: 'edit_and_accept' as const, patch: { claimText: 'Reviewed Claim.' } },
+    };
+
+    await expect(repository.reviewDraft(input)).resolves.toEqual(action);
+    expect(invoke).toHaveBeenCalledWith('review_draft', { input });
+  });
+
   it('loads models through the allowlisted native command without persisting a temporary key', async () => {
     const models = [{ id: 'model-a', ownedBy: 'provider' }];
     const invoke = vi.fn().mockResolvedValue(models);

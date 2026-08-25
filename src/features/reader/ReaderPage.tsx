@@ -115,7 +115,7 @@ export function ReaderPage({
   onSaveJudgment,
   onExportMarkdown,
 }: ReaderPageProps) {
-  const [tab, setTab] = useState<ReaderTab>('map');
+  const [tab, setTab] = useState<ReaderTab>('anchors');
   const [researchOpen, setResearchOpen] = useState(() => window.innerWidth >= 1024);
   const [outlineOpen, setOutlineOpen] = useState(() => window.innerWidth >= 1240);
   const [toolbarMenuOpen, setToolbarMenuOpen] = useState(false);
@@ -123,6 +123,7 @@ export function ReaderPage({
   const [activeAnchor, setActiveAnchor] = useState<string | null>(null);
   const [activeDocumentBlock, setActiveDocumentBlock] = useState<string | null>(null);
   const [documentIndex, setDocumentIndex] = useState<LocalDocumentIndex | null>(null);
+  const [documentIndexError, setDocumentIndexError] = useState<string | null>(null);
   const [anchorStates, setAnchorStates] = useState<ReadonlyMap<string, AnchorLocationState>>(() => new Map());
   const fileInputRef = useRef<HTMLInputElement>(null);
   const toolbarMenuRef = useRef<HTMLDivElement>(null);
@@ -139,9 +140,13 @@ export function ReaderPage({
   const updateDocumentIndex = useCallback((index: LocalDocumentIndex | null) => {
     setDocumentIndex(index);
   }, []);
+  const updateDocumentIndexError = useCallback((message: string | null) => {
+    setDocumentIndexError(message);
+  }, []);
 
   useEffect(() => {
     setDocumentIndex(null);
+    setDocumentIndexError(null);
     setActiveDocumentBlock(null);
   }, [paper.id, paper.currentVersionId]);
 
@@ -229,7 +234,7 @@ export function ReaderPage({
             setToolbarMenuOpen(false);
             if (nativeFileDialog) onImportPdf();
             else fileInputRef.current?.click();
-          }}><FileUp size={16} /><span>更换 PDF</span></button>
+          }}><FileUp size={16} /><span>导入另一篇 PDF</span></button>
           <button type="button" role="menuitem" onClick={() => { setToolbarMenuOpen(false); onExportMarkdown(); }}><Download size={16} /><span>导出 Verified Markdown</span></button>
         </div> : null}
       </div>
@@ -248,7 +253,7 @@ export function ReaderPage({
 
       <main className="document-stage has-live-pdf" aria-label="本地 PDF 正文">
         {localPdfFile && localPaperVersionId
-          ? <LocalPdfViewer file={localPdfFile} anchors={localAnchors} expectedPaperVersionId={localPaperVersionId} activeAnchorId={activeAnchor} activeDocumentBlockId={activeDocumentBlock} onAnchorCreate={onAnchorCreate} onAnchorStatesChange={updateAnchorStates} onDocumentIndexChange={updateDocumentIndex} />
+          ? <LocalPdfViewer file={localPdfFile} anchors={localAnchors} expectedPaperVersionId={localPaperVersionId} activeAnchorId={activeAnchor} activeDocumentBlockId={activeDocumentBlock} onAnchorCreate={onAnchorCreate} onAnchorStatesChange={updateAnchorStates} onDocumentIndexChange={updateDocumentIndex} onDocumentIndexError={updateDocumentIndexError} />
           : <div className="reader-error reader-error--document"><AlertTriangle size={20} /><strong>本地 PDF 无法恢复</strong><p>{localPdfError ?? 'PDF 文件缺失；Anchor 与审阅记录仍保留在本地仓库。'}</p></div>}
       </main>
 
@@ -261,7 +266,7 @@ export function ReaderPage({
           </button>)}
         </div>
         <div className="research-content" role="tabpanel" id={`reader-panel-${tab}`} aria-labelledby={`reader-tab-${tab}`}>
-          {tab === 'map' && localPaperVersionId ? <PaperMapPanel paperId={paper.id} paperVersionId={localPaperVersionId} model={openAiModel} documentIndex={documentIndex} paperMap={paperMap} stalePaperMap={stalePaperMap} anchors={localAnchors} onGenerate={onGeneratePaperMap} onJumpBlock={jumpToDocumentBlock} onIncludeBlock={includeDocumentBlock} /> : null}
+          {tab === 'map' && localPaperVersionId ? <PaperMapPanel paperId={paper.id} paperVersionId={localPaperVersionId} model={openAiModel} documentIndex={documentIndex} documentIndexError={documentIndexError} paperMap={paperMap} stalePaperMap={stalePaperMap} anchors={localAnchors} onGenerate={onGeneratePaperMap} onJumpBlock={jumpToDocumentBlock} onIncludeBlock={includeDocumentBlock} /> : null}
           {tab === 'anchors' ? <LocalAnchorPanel anchors={localAnchors} stateForAnchor={stateForAnchor} onJump={jumpToLocalAnchor} onCreateManualDraft={onCreateManualDraft} onRequestAiDraft={onRequestAiDraft} draftAnchorIds={draftAnchorIds} openAiModel={openAiModel} /> : null}
           {tab === 'ledger' ? <PersistedLedgerPanel entries={persistedReviews} anchors={localAnchors} onJump={jumpToLocalAnchor} onReview={onReviewDraft} /> : null}
           {tab === 'judgment' ? <JudgmentPanel judgment={judgment} verifiedClaims={verifiedClaims} persistenceLabel={persistenceLabel} onSave={onSaveJudgment} onJump={(claimId) => {

@@ -11,6 +11,7 @@ import {
 } from 'lucide-react';
 import type {
   PDFDocumentLoadingTask,
+  PDFDocumentProxy,
   PDFPageProxy,
   TextContent,
 } from 'pdfjs-dist/types/src/display/api';
@@ -54,6 +55,7 @@ interface LocalPdfViewerProps {
   onAnchorCreate: (anchor: LocalPdfAnchor) => Promise<void> | void;
   onAnchorStatesChange?: (states: readonly AnchorLocationState[]) => void;
   onDocumentIndexChange?: (index: LocalDocumentIndex | null) => void;
+  onDocumentIndexError?: (message: string | null) => void;
 }
 
 export type AnchorLocationStatus =
@@ -266,6 +268,33 @@ export function classifyAnchorForPdf(
 
 function ignoreAnchorStates(): void {}
 function ignoreDocumentIndex(): void {}
+function ignoreDocumentIndexError(): void {}
+
+interface PdfSession {
+  pdfjs: typeof import('pdfjs-dist');
+  pdf: PDFDocumentProxy;
+  hash: string;
+  pages: Map<number, Promise<PDFPageProxy>>;
+  textContents: Map<number, Promise<TextContent>>;
+}
+
+function pageForSession(session: PdfSession, pageNumber: number): Promise<PDFPageProxy> {
+  let page = session.pages.get(pageNumber);
+  if (!page) {
+    page = session.pdf.getPage(pageNumber);
+    session.pages.set(pageNumber, page);
+  }
+  return page;
+}
+
+function textContentForSession(session: PdfSession, pageNumber: number): Promise<TextContent> {
+  let textContent = session.textContents.get(pageNumber);
+  if (!textContent) {
+    textContent = pageForSession(session, pageNumber).then(readTextContent);
+    session.textContents.set(pageNumber, textContent);
+  }
+  return textContent;
+}
 
 export function LocalPdfViewer({
   file,
@@ -276,13 +305,21 @@ export function LocalPdfViewer({
   onAnchorCreate,
   onAnchorStatesChange = ignoreAnchorStates,
   onDocumentIndexChange = ignoreDocumentIndex,
+  onDocumentIndexError = ignoreDocumentIndexError,
 }: LocalPdfViewerProps) {
   const viewerRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const hostRef = useRef<HTMLDivElement>(null);
   const documentIndexRef = useRef<LocalDocumentIndex | null>(null);
-  const indexedFileRef = useRef<File | null>(null);
-  const [status, setStatus] = useState('正在校验并打开本地 PDF…');
+  const anchorsRef = useRef(anchors);
+  const onAnchorStatesChangeRef = useRef(onAnchorStatesChange);
+  const onDocumentIndexChangeRef = useRef(onDocumentIndexChange);
+  const onDocumentIndexErrorRef = useRef(onDocumentIndexError);
+  const [session, setSession] = useState<PdfSession | null>(null);
+  const [renderState, setRenderState] = useState<'opening' | 'rendering' | 'ready' | 'failed'>('opening');
+  const [indexProgress, setIndexProgress] = useState<string | null>(null);
+  const [indexError, setIndexError] = useState<string | null>(null);
+  const [renderWarning, setRenderWarning] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pdfHash, setPdfHash] = useState('');
   const [pageCount, setPageCount] = useState(0);
@@ -291,6 +328,11 @@ export function LocalPdfViewer({
   const [viewerWidth, setViewerWidth] = useState(0);
   const [pending, setPending] = useState<PendingSelection | null>(null);
   const [renderRevision, setRenderRevision] = useState(0);
+
+  anchorsRef.current = anchors;
+  onAnchorStatesChangeRef.current = onAnchorStatesChange;
+  onDocumentIndexChangeRef.current = onDocumentIndexChange;
+  onDocumentIndexErrorRef.current = onDocumentIndexError;
 
   useEffect(() => {
     const viewer = viewerRef.current;
@@ -307,21 +349,27 @@ export function LocalPdfViewer({
   }, []);
 
   useEffect(() => {
-    const host = hostRef.current;
-    if (!host || viewerWidth === 0) return;
-    const hostElement = host;
-
     let canceled = false;
     let loadingTask: PDFDocumentLoadingTask | undefined;
-    hostElement.replaceChildren();
+    setSession(null);
+    setRenderState('opening');
+    setRenderWarning(null);
     setPending(null);
     setError(null);
-    setStatus('正在校验并打开本地 PDF…');
-    if (indexedFileRef.current !== file) {
-      indexedFileRef.current = file;
-      documentIndexRef.current = null;
-      onDocumentIndexChange(null);
-    }
+    setPdfHash('');
+    setPageCount(0);
+    setCurrentPage(1);
+    setIndexProgress(null);
+    setIndexError(null);
+    documentIndexRef.current = null;
+    onDocumentIndexChangeRef.current(null);
+    onDocumentIndexErrorRef.current(null);
+    hostRef.current?.replaceChildren();
+    onAnchorStatesChangeRef.current(anchorsRef.current.map((anchor) => ({
+      anchorId: anchor.id,
+      status: 'loading',
+      message: '正在恢复 PDF 页与可见标记…',
+    })));
 
     async function openPdf() {
       const arrayBuffer = await file.arrayBuffer();
@@ -340,16 +388,101 @@ export function LocalPdfViewer({
       setPdfHash(hash);
       loadingTask = pdfjs.getDocument({ data: arrayBuffer });
       const pdf = await loadingTask.promise;
+      if (canceled) return;
       setPageCount(pdf.numPages);
       setCurrentPage(1);
-      setStatus(`正在本地建立全文索引 0 / ${pdf.numPages} 页…`);
-      const documentLines: PageTextLine[][] = [];
-      let renderChain = Promise.resolve();
+      setSession({
+        pdfjs,
+        pdf,
+        hash,
+        pages: new Map(),
+        textContents: new Map(),
+      });
+    }
 
-      for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
+    void openPdf().catch((reason: unknown) => {
+      if (canceled) return;
+      const message = reason instanceof Error ? reason.message : '无法打开此 PDF。';
+      setRenderState('failed');
+      setError(message);
+      onAnchorStatesChangeRef.current(anchorsRef.current.map((anchor) => ({
+        anchorId: anchor.id,
+        status: 'pdf-corrupt',
+        message: `PDF 损坏或无法解析：${message}`,
+      })));
+    });
+
+    return () => {
+      canceled = true;
+      void loadingTask?.destroy();
+    };
+  }, [file]);
+
+  useEffect(() => {
+    if (!session) return;
+    let canceled = false;
+    setIndexError(null);
+    setIndexProgress(`正在本地建立全文索引 0 / ${session.pdf.numPages} 页…`);
+    onDocumentIndexErrorRef.current(null);
+
+    async function buildIndex() {
+      const documentLines: PageTextLine[][] = [];
+      for (let pageNumber = 1; pageNumber <= session!.pdf.numPages; pageNumber += 1) {
         if (canceled) return;
-        setStatus(`正在本地建立全文索引 ${pageNumber} / ${pdf.numPages} 页…`);
-        const page = await pdf.getPage(pageNumber);
+        setIndexProgress(`正在本地建立全文索引 ${pageNumber} / ${session!.pdf.numPages} 页…`);
+        const page = await pageForSession(session!, pageNumber);
+        const baseViewport = page.getViewport({ scale: 1 });
+        const textContent = await textContentForSession(session!, pageNumber).catch((reason: unknown) => {
+          const message = reason instanceof Error ? reason.message : String(reason);
+          throw new Error(`第 ${pageNumber} 页文本提取失败：${message}`);
+        });
+        documentLines.push(extractPageTextLines(
+          pageNumber,
+          textRunsForPage(textContent, baseViewport),
+        ));
+      }
+      if (canceled) return;
+      const documentIndex: LocalDocumentIndex = {
+        pdfSha256: `sha256:${session!.hash}`,
+        parserVersion: DOCUMENT_BLOCK_PARSER_VERSION,
+        pageCount: session!.pdf.numPages,
+        blocks: buildDocumentBlocks(documentLines),
+      };
+      documentIndexRef.current = documentIndex;
+      onDocumentIndexChangeRef.current(documentIndex);
+      setIndexProgress(null);
+    }
+
+    void buildIndex().catch((reason: unknown) => {
+      if (canceled) return;
+      const message = reason instanceof Error ? reason.message : '全文索引建立失败。';
+      documentIndexRef.current = null;
+      onDocumentIndexChangeRef.current(null);
+      onDocumentIndexErrorRef.current(message);
+      setIndexProgress(null);
+      setIndexError(message);
+    });
+
+    return () => {
+      canceled = true;
+    };
+  }, [session]);
+
+  useEffect(() => {
+    const host = hostRef.current;
+    if (!host || !session || viewerWidth === 0) return;
+    const hostElement = host;
+    let canceled = false;
+    hostElement.replaceChildren();
+    setPending(null);
+    setRenderWarning(null);
+    setRenderState('rendering');
+
+    async function renderPdf() {
+      const warnings: string[] = [];
+      for (let pageNumber = 1; pageNumber <= session!.pdf.numPages; pageNumber += 1) {
+        if (canceled) return;
+        const page = await pageForSession(session!, pageNumber);
         const baseViewport = page.getViewport({ scale: 1 });
         const fitWidth = Math.max(320, Math.min(820, viewerWidth - 72));
         const fitScale = fitWidth / baseViewport.width;
@@ -379,104 +512,48 @@ export function LocalPdfViewer({
 
         const pageLabel = document.createElement('div');
         pageLabel.className = 'pdf-page-label';
-        pageLabel.textContent = `${pageNumber} / ${pdf.numPages}`;
+        pageLabel.textContent = `${pageNumber} / ${session!.pdf.numPages}`;
         pageElement.append(canvas, textLayer, pageLabel);
         hostElement.append(pageElement);
 
-        const textContent = await readTextContent(page).catch((reason: unknown) => {
+        await page.render({
+          canvas,
+          canvasContext: context,
+          viewport,
+          transform:
+            outputScale === 1
+              ? undefined
+              : [outputScale, 0, 0, outputScale, 0, 0],
+        }).promise.catch((reason: unknown) => {
           const message = reason instanceof Error ? reason.message : String(reason);
-          throw new Error(`第 ${pageNumber} 页文本提取失败：${message}`);
+          throw new Error(`第 ${pageNumber} 页画布渲染失败：${message}`);
         });
-        documentLines.push(extractPageTextLines(
-          pageNumber,
-          textRunsForPage(textContent, baseViewport),
-        ));
-        renderChain = renderChain.then(async () => {
-          if (canceled) return;
-          const canvasRender = page.render({
-            canvas,
-            canvasContext: context,
-            viewport,
-            transform:
-              outputScale === 1
-                ? undefined
-                : [outputScale, 0, 0, outputScale, 0, 0],
-          }).promise.catch((reason: unknown) => {
-            const message = reason instanceof Error ? reason.message : String(reason);
-            throw new Error(`第 ${pageNumber} 页画布渲染失败：${message}`);
-          });
-          let textLayerRenderer: InstanceType<typeof pdfjs.TextLayer>;
-          try {
-            textLayerRenderer = new pdfjs.TextLayer({
-              textContentSource: textContent,
-              container: textLayer,
-              viewport,
-            });
-          } catch (reason) {
-            const message = reason instanceof Error ? reason.message : String(reason);
-            throw new Error(`第 ${pageNumber} 页文本层初始化失败：${message}`);
-          }
-          const textRender = textLayerRenderer.render().catch((reason: unknown) => {
-              const message = reason instanceof Error ? reason.message : String(reason);
-              throw new Error(`第 ${pageNumber} 页文本层渲染失败：${message}`);
-          });
-          await Promise.all([canvasRender, textRender]);
-        });
-      }
 
-      if (canceled) return;
-      const anchorStates = anchors.map((anchor) => classifyAnchorForPdf(anchor, {
-        pdfHash: hash,
-        pageCount: pdf.numPages,
-        paperVersionId: expectedPaperVersionId,
-      }));
-      const stateById = new Map(anchorStates.map((state) => [state.anchorId, state]));
-      for (const anchor of anchors) {
-        if (stateById.get(anchor.id)?.status !== 'ready') continue;
-        const pageElement = hostElement.querySelector<HTMLElement>(
-          `.pdf-live-page[data-page-index="${anchor.pageIndex}"]`,
-        );
-        if (!pageElement) continue;
-        const fragments = anchor.rectsNorm?.length ? anchor.rectsNorm : [anchor.bboxNorm];
-        for (const [fragmentIndex, [x0, y0, x1, y1]] of fragments.entries()) {
-          const overlay = document.createElement('button');
-          overlay.type = 'button';
-          overlay.className = `pdf-anchor-overlay${fragmentIndex === 0 ? ' is-first-fragment' : ''}`;
-          overlay.dataset.anchorId = anchor.id;
-          overlay.dataset.fragmentIndex = String(fragmentIndex);
-          overlay.setAttribute('aria-label', `Evidence Anchor：${anchor.selectedText}`);
-          overlay.title = `第 ${anchor.pageIndex + 1} 页 · ${anchor.selectedText}`;
-          overlay.style.left = `${x0 * 100}%`;
-          overlay.style.top = `${y0 * 100}%`;
-          overlay.style.width = `${(x1 - x0) * 100}%`;
-          overlay.style.height = `${(y1 - y0) * 100}%`;
-          pageElement.append(overlay);
+        try {
+          const textContent = await textContentForSession(session!, pageNumber);
+          const renderer = new session!.pdfjs.TextLayer({
+            textContentSource: textContent,
+            container: textLayer,
+            viewport,
+          });
+          await renderer.render();
+        } catch (reason) {
+          const message = reason instanceof Error ? reason.message : String(reason);
+          warnings.push(`第 ${pageNumber} 页文本层不可用：${message}`);
         }
       }
-      onAnchorStatesChange(anchorStates);
-      const documentIndex: LocalDocumentIndex = {
-        pdfSha256: `sha256:${hash}`,
-        parserVersion: DOCUMENT_BLOCK_PARSER_VERSION,
-        pageCount: pdf.numPages,
-        blocks: buildDocumentBlocks(documentLines),
-      };
-      documentIndexRef.current = documentIndex;
-      onDocumentIndexChange(documentIndex);
-      setRenderRevision((revision) => revision + 1);
-      setStatus(`全文索引已完成 · 正在渲染 ${pdf.numPages} 页 PDF…`);
-      await renderChain;
       if (canceled) return;
-      setStatus(`已打开 ${pdf.numPages} 页 · 本地文件未上传`);
+      setRenderWarning(warnings.length > 0 ? warnings.join('；') : null);
+      setRenderState('ready');
+      setRenderRevision((revision) => revision + 1);
     }
 
-    void openPdf().catch((reason: unknown) => {
+    void renderPdf().catch((reason: unknown) => {
       if (canceled) return;
-      const message = reason instanceof Error ? reason.message : '无法打开此 PDF。';
-      documentIndexRef.current = null;
-      onDocumentIndexChange(null);
+      const message = reason instanceof Error ? reason.message : 'PDF 渲染失败。';
+      setRenderState('failed');
       setError(message);
-      setStatus('PDF 打开失败');
-      onAnchorStatesChange(anchors.map((anchor) => ({
+      onAnchorStatesChangeRef.current(anchorsRef.current.map((anchor) => ({
         anchorId: anchor.id,
         status: 'pdf-corrupt',
         message: `PDF 损坏或无法解析：${message}`,
@@ -485,9 +562,43 @@ export function LocalPdfViewer({
 
     return () => {
       canceled = true;
-      void loadingTask?.destroy();
     };
-  }, [anchors, expectedPaperVersionId, file, onAnchorStatesChange, onDocumentIndexChange, viewerWidth, zoom]);
+  }, [session, viewerWidth, zoom]);
+
+  useEffect(() => {
+    const host = hostRef.current;
+    if (!host || !pdfHash || pageCount === 0) return;
+    for (const overlay of host.querySelectorAll('.pdf-anchor-overlay')) overlay.remove();
+    const anchorStates = anchors.map((anchor) => classifyAnchorForPdf(anchor, {
+      pdfHash,
+      pageCount,
+      paperVersionId: expectedPaperVersionId,
+    }));
+    const stateById = new Map(anchorStates.map((state) => [state.anchorId, state]));
+    for (const anchor of anchors) {
+      if (stateById.get(anchor.id)?.status !== 'ready') continue;
+      const pageElement = host.querySelector<HTMLElement>(
+        `.pdf-live-page[data-page-index="${anchor.pageIndex}"]`,
+      );
+      if (!pageElement) continue;
+      const fragments = anchor.rectsNorm?.length ? anchor.rectsNorm : [anchor.bboxNorm];
+      for (const [fragmentIndex, [x0, y0, x1, y1]] of fragments.entries()) {
+        const overlay = document.createElement('button');
+        overlay.type = 'button';
+        overlay.className = `pdf-anchor-overlay${fragmentIndex === 0 ? ' is-first-fragment' : ''}`;
+        overlay.dataset.anchorId = anchor.id;
+        overlay.dataset.fragmentIndex = String(fragmentIndex);
+        overlay.setAttribute('aria-label', `Evidence Anchor：${anchor.selectedText}`);
+        overlay.title = `第 ${anchor.pageIndex + 1} 页 · ${anchor.selectedText}`;
+        overlay.style.left = `${x0 * 100}%`;
+        overlay.style.top = `${y0 * 100}%`;
+        overlay.style.width = `${(x1 - x0) * 100}%`;
+        overlay.style.height = `${(y1 - y0) * 100}%`;
+        pageElement.append(overlay);
+      }
+    }
+    onAnchorStatesChangeRef.current(anchorStates);
+  }, [anchors, expectedPaperVersionId, pageCount, pdfHash, renderRevision]);
 
   useEffect(() => {
     const host = hostRef.current;
@@ -619,11 +730,25 @@ export function LocalPdfViewer({
     }
   }
 
+  const status = renderState === 'opening'
+    ? '正在校验并打开本地 PDF…'
+    : renderState === 'rendering'
+      ? `正在渲染 ${pageCount} 页 PDF…`
+      : renderState === 'failed'
+        ? 'PDF 打开失败'
+        : indexError
+          ? `已打开 ${pageCount} 页 · 全文索引不可用`
+          : indexProgress
+            ? `已打开 ${pageCount} 页 · ${indexProgress}`
+            : `已打开 ${pageCount} 页 · 全文索引已完成 · 本地文件未上传`;
+  const busy = renderState === 'opening' || renderState === 'rendering' || indexProgress !== null;
+  const hasWarning = Boolean(error || indexError || renderWarning);
+
   return (
     <div ref={viewerRef} className="local-pdf-viewer">
       <div ref={scrollRef} className="pdf-scroll-area">
         <div className="pdf-local-status" role="status">
-          {error ? <AlertTriangle size={15} /> : <LoaderCircle className={pageCount ? '' : 'spin'} size={15} />}
+          {hasWarning ? <AlertTriangle size={15} /> : <LoaderCircle className={busy ? 'spin' : ''} size={15} />}
           <span>{status}</span>
         </div>
         {pending ? (
@@ -641,6 +766,8 @@ export function LocalPdfViewer({
           </div>
         ) : null}
         {error ? <div className="reader-error">{error}</div> : null}
+        {indexError ? <div className="reader-error" role="alert">PDF 已打开，但全文索引失败：{indexError}；Paper Map 暂不可用。</div> : null}
+        {renderWarning ? <div className="reader-error" role="alert">PDF 已打开，但部分文本层不可用：{renderWarning}；这些页面仍可查看，但无法选择对应文字。</div> : null}
         <div ref={hostRef} className="pdf-live-pages" onMouseUp={captureSelection} />
       </div>
       <div className="pdf-reader-controls" role="toolbar" aria-label="PDF 页面与缩放">

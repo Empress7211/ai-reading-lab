@@ -20,7 +20,7 @@ Competitive wedge:
 
 The product is not an AI workspace, second brain, RAG system, agent platform, or automatic literature-review writer.
 
-## v0.1 scope
+## 0.1.0 RC / Internal Alpha scope
 
 Must have:
 
@@ -28,7 +28,8 @@ Must have:
 2. Evidence Anchors that return to the correct PDF location.
 3. A Claim review lifecycle with Accept, Edit, and Reject.
 4. User-owned structured judgment notes.
-5. AI that may create Draft Claims only; it must never bypass human review.
+5. The AI Draft path may create Draft Claims only; it must never bypass human review.
+6. An experimental, single-paper Paper Map may provide unreviewed navigation only after explicit structured full-text consent; it cannot create a Verified Claim or write My Judgment.
 
 Explicitly out of scope:
 
@@ -65,7 +66,9 @@ Claim 1 ── N EvidenceLink N ── 1 EvidenceAnchor
 
 The desktop app exposes one provider shape: OpenAI-compatible Chat Completions. The user supplies the Base URL, API key, and model ID; PaperWeave stores the key in app-local configuration, excludes it from workspace snapshots and exports, and reuses it until the user replaces or clears it in Settings. The model list may be loaded from `/models` or entered manually.
 
-Only the selected Evidence Anchor text and paper title are sent when the user explicitly requests an AI Draft. The complete PDF is not uploaded by this path. Returned JSON is validated and persisted only as evidence-bound Draft Claims with a `modelRunId`; it cannot create a Verified Claim or write “My Judgment.”
+For AI Drafts, only the selected Evidence Anchor text and paper title are sent after an explicit request. The complete PDF is not uploaded by this path. Returned JSON is validated and persisted only as evidence-bound Draft Claims with a `modelRunId`; it cannot create a Verified Claim or write “My Judgment.”
+
+Paper Map is a separate experimental, single-paper path. After the user confirms that paper, it sends extracted structured full-text evidence blocks—not the PDF binary—to build unreviewed navigation assistance. Its output cannot create a Verified Claim or write “My Judgment.”
 
 On provider failure:
 
@@ -96,4 +99,4 @@ Phase 1 is complete when:
 - existing PDF, Anchor, local persistence, and explicit review-fixture tests still pass;
 - the full TypeScript, Vitest, Vite, Rust test, and Clippy checks pass.
 
-Phase 1 produces an **Internal Alpha Baseline**, not v0.1.
+Phase 1 produces the **Internal Alpha Baseline**. The current **0.1.0 unsigned local RC (Internal Alpha)** packages the implemented baseline for local/internal acceptance; it is not a public production release.

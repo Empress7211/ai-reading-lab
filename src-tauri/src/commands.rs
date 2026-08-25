@@ -39,10 +39,10 @@ pub struct WorkspaceSnapshot {
 }
 
 #[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ReviewDraftInput {
-    pub action: Value,
-    pub verified_claim: Option<Value>,
+    pub draft_id: String,
+    pub decision: Value,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -508,11 +508,17 @@ fn update_paper_metadata_inner(
 
 #[tauri::command(rename_all = "camelCase")]
 pub fn save_anchor(state: State<'_, AppState>, anchor: Value) -> Result<Value, AppError> {
+    save_anchor_inner(&state, anchor)
+}
+
+fn save_anchor_inner(state: &AppState, anchor: Value) -> Result<Value, AppError> {
     validate_anchor_value(&anchor)?;
     let id = required_string(&anchor, "id")?;
-    let connection = storage::connect(&state)?;
-    storage::insert_json(&connection, "anchor", id, &anchor)?;
-    storage::audit(&connection, "AnchorCreated", "anchor", id, &json!({}))?;
+    let mut connection = storage::connect(state)?;
+    let transaction = connection.transaction()?;
+    storage::insert_json(&transaction, "anchor", id, &anchor)?;
+    storage::audit(&transaction, "AnchorCreated", "anchor", id, &json!({}))?;
+    transaction.commit()?;
     Ok(anchor)
 }
 
@@ -673,28 +679,271 @@ pub fn review_draft(
     review_draft_inner(&state, input)
 }
 
+const REVIEW_EDITABLE_FIELDS: [&str; 10] = [
+    "claimText",
+    "claimType",
+    "epistemicSource",
+    "assumptions",
+    "scopeConditions",
+    "limitations",
+    "confidence",
+    "confidenceBasis",
+    "needsHumanAttention",
+    "userComment",
+];
+
+fn validate_string_array(claim: &Value, field: &str) -> Result<(), AppError> {
+    let values = claim
+        .get(field)
+        .and_then(Value::as_array)
+        .ok_or_else(|| AppError::policy("VERIFIED_CLAIM_INVALID", format!("{field} 必须是数组")))?;
+    if values.iter().any(|value| !value.is_string()) {
+        return Err(AppError::policy(
+            "VERIFIED_CLAIM_INVALID",
+            format!("{field} 只能包含字符串"),
+        ));
+    }
+    Ok(())
+}
+
+fn validate_reviewed_claim(connection: &Connection, claim: &Value) -> Result<(), AppError> {
+    let claim_id = required_string(claim, "id")?;
+    let paper_version_id = required_string(claim, "paperVersionId")?;
+    let claim_text = required_string(claim, "claimText")?;
+    if claim_text.chars().count() < 5 || claim_text.chars().count() > 1_500 {
+        return Err(AppError::policy(
+            "VERIFIED_CLAIM_INVALID",
+            "Claim 必须包含 5 到 1500 个字符的非空陈述",
+        ));
+    }
+    let claim_type = required_string(claim, "claimType")?;
+    if !matches!(
+        claim_type,
+        "theoretical"
+            | "empirical"
+            | "methodological"
+            | "descriptive"
+            | "interpretive"
+            | "normative"
+    ) {
+        return Err(AppError::policy("VERIFIED_CLAIM_INVALID", "claimType 无效"));
+    }
+    let epistemic_source = required_string(claim, "epistemicSource")?;
+    if !matches!(
+        epistemic_source,
+        "direct_quote"
+            | "author_claim"
+            | "reported_result"
+            | "ai_inference"
+            | "user_judgment"
+            | "external_metadata"
+    ) {
+        return Err(AppError::policy(
+            "VERIFIED_CLAIM_INVALID",
+            "epistemicSource 无效",
+        ));
+    }
+    let created_by = required_string(claim, "createdBy")?;
+    if !matches!(created_by, "ai" | "user")
+        || (created_by == "ai" && epistemic_source == "user_judgment")
+    {
+        return Err(AppError::policy(
+            "VERIFIED_CLAIM_INVALID",
+            "Claim 创建者与认知来源不一致",
+        ));
+    }
+    let confidence = claim.get("confidence").unwrap_or(&Value::Null);
+    let confidence_valid = confidence
+        .as_f64()
+        .is_some_and(|value| value.is_finite() && (0.0..=1.0).contains(&value));
+    if (created_by == "ai" && !confidence_valid)
+        || (created_by == "user" && !confidence.is_null() && !confidence_valid)
+    {
+        return Err(AppError::policy(
+            "VERIFIED_CLAIM_INVALID",
+            "AI confidence 必须在 0 到 1 之间；用户 Claim 可以为 null",
+        ));
+    }
+    for field in [
+        "assumptions",
+        "scopeConditions",
+        "limitations",
+        "confidenceBasis",
+    ] {
+        validate_string_array(claim, field)?;
+    }
+    let needs_human_attention = claim
+        .get("needsHumanAttention")
+        .and_then(Value::as_bool)
+        .ok_or_else(|| {
+            AppError::policy("VERIFIED_CLAIM_INVALID", "needsHumanAttention 必须是布尔值")
+        })?;
+    if created_by == "ai" && epistemic_source == "ai_inference" && !needs_human_attention {
+        return Err(AppError::policy(
+            "VERIFIED_CLAIM_INVALID",
+            "AI inference 必须保留人工关注标记",
+        ));
+    }
+    if claim
+        .get("userComment")
+        .is_some_and(|value| !value.is_null() && !value.is_string())
+    {
+        return Err(AppError::policy(
+            "VERIFIED_CLAIM_INVALID",
+            "userComment 必须是字符串或 null",
+        ));
+    }
+
+    let evidence_link_ids = claim
+        .get("evidenceLinkIds")
+        .and_then(Value::as_array)
+        .ok_or_else(|| AppError::policy("VERIFIED_CLAIM_INVALID", "evidenceLinkIds 必须是数组"))?;
+    if (created_by == "ai" || !matches!(epistemic_source, "user_judgment" | "ai_inference"))
+        && evidence_link_ids.is_empty()
+    {
+        return Err(AppError::policy(
+            "VERIFIED_CLAIM_INVALID",
+            "事实性或 AI Claim 必须引用 EvidenceLink",
+        ));
+    }
+    let mut seen_link_ids = HashSet::new();
+    let mut has_direct_quote = false;
+    let mut has_reported_result_support = false;
+    for link_id in evidence_link_ids {
+        let link_id = link_id
+            .as_str()
+            .filter(|value| !value.is_empty())
+            .ok_or_else(|| {
+                AppError::policy(
+                    "VERIFIED_CLAIM_INVALID",
+                    "evidenceLinkIds 只能包含非空字符串",
+                )
+            })?;
+        if !seen_link_ids.insert(link_id) {
+            return Err(AppError::policy(
+                "VERIFIED_CLAIM_INVALID",
+                "Claim 不能重复引用同一个 EvidenceLink",
+            ));
+        }
+        let link = storage::get_json(connection, "evidence_link", link_id)?.ok_or_else(|| {
+            AppError::policy(
+                "VERIFIED_CLAIM_INVALID",
+                format!("EvidenceLink {link_id} 不存在"),
+            )
+        })?;
+        if required_string(&link, "claimId")? != claim_id {
+            return Err(AppError::policy(
+                "VERIFIED_CLAIM_INVALID",
+                "EvidenceLink 属于另一个 Claim",
+            ));
+        }
+        let anchor_id = required_string(&link, "anchorId")?;
+        let anchor = storage::get_json(connection, "anchor", anchor_id)?.ok_or_else(|| {
+            AppError::policy(
+                "VERIFIED_CLAIM_INVALID",
+                format!("Evidence Anchor {anchor_id} 不存在"),
+            )
+        })?;
+        validate_anchor_value(&anchor)?;
+        if required_string(&anchor, "paperVersionId")? != paper_version_id
+            || anchor.get("relocationStatus").and_then(Value::as_str) == Some("orphaned")
+        {
+            return Err(AppError::policy(
+                "VERIFIED_CLAIM_INVALID",
+                "Verified Claim 不能引用其他版本或已孤立的 Anchor",
+            ));
+        }
+        has_direct_quote |= link
+            .get("quotedFragment")
+            .and_then(Value::as_str)
+            .is_some_and(|value| !value.trim().is_empty());
+        has_reported_result_support |= matches!(
+            link.get("supportType").and_then(Value::as_str),
+            Some("reported_result" | "figure" | "table" | "equation")
+        );
+    }
+    if epistemic_source == "direct_quote" && !has_direct_quote {
+        return Err(AppError::policy(
+            "VERIFIED_CLAIM_INVALID",
+            "直接引文必须保留 quotedFragment",
+        ));
+    }
+    if epistemic_source == "reported_result" && !has_reported_result_support {
+        return Err(AppError::policy(
+            "VERIFIED_CLAIM_INVALID",
+            "Reported result 必须引用结果文本、图、表或公式",
+        ));
+    }
+    Ok(())
+}
+
+fn snapshot_ai_draft(draft: &Value) -> Result<Value, AppError> {
+    if required_string(draft, "createdBy")? != "ai" {
+        return Ok(Value::Null);
+    }
+    for field in [
+        "claimText",
+        "claimType",
+        "epistemicSource",
+        "evidenceLinkIds",
+        "assumptions",
+        "scopeConditions",
+        "limitations",
+        "confidence",
+        "confidenceBasis",
+        "needsHumanAttention",
+        "modelRunId",
+    ] {
+        if draft.get(field).is_none() {
+            return Err(AppError::policy(
+                "DRAFT_RECORD_INVALID",
+                format!("AI Draft 缺少字段 {field}"),
+            ));
+        }
+    }
+    Ok(json!({
+        "claimText": draft["claimText"],
+        "claimType": draft["claimType"],
+        "epistemicSource": draft["epistemicSource"],
+        "evidenceLinkIds": draft["evidenceLinkIds"],
+        "assumptions": draft["assumptions"],
+        "scopeConditions": draft["scopeConditions"],
+        "limitations": draft["limitations"],
+        "confidence": draft["confidence"],
+        "confidenceBasis": draft["confidenceBasis"],
+        "needsHumanAttention": draft["needsHumanAttention"],
+        "modelRunId": draft["modelRunId"],
+    }))
+}
+
 fn review_draft_inner(state: &AppState, input: ReviewDraftInput) -> Result<Value, AppError> {
-    let action_id = required_string(&input.action, "id")?;
-    let draft_id = required_string(&input.action, "claimId")?;
-    let from_status = required_string(&input.action, "fromStatus")?;
-    let to_status = required_string(&input.action, "toStatus")?;
-    let action_kind = required_string(&input.action, "action")?;
-    let expected_to_status = match action_kind {
+    let draft_id = input.draft_id.trim();
+    if draft_id.is_empty() {
+        return Err(AppError::policy("SCHEMA_REQUIRED", "缺少字段 draftId"));
+    }
+    let action_kind = required_string(&input.decision, "action")?;
+    let to_status = match action_kind {
         "accept" => "accepted",
         "edit_and_accept" => "edited",
         "reject" => "rejected",
-        _ => "",
+        _ => {
+            return Err(AppError::policy(
+                "REVIEW_ACTION_INVALID",
+                "审阅动作必须是 accept、edit_and_accept 或 reject",
+            ))
+        }
     };
-    if from_status != "draft" || to_status != expected_to_status {
+    let mut connection = storage::connect(state)?;
+    let transaction = connection.transaction()?;
+    let draft = storage::get_json(&transaction, "draft", draft_id)?
+        .ok_or_else(|| AppError::policy("DRAFT_NOT_FOUND", "待审阅 Draft 不存在"))?;
+    if required_string(&draft, "reviewStatus")? != "draft" {
         return Err(AppError::policy(
             "REVIEW_ACTION_INVALID",
-            "审阅动作必须从 draft 转移到 accepted、edited 或 rejected",
+            "只有 draft 状态的 Claim 可以审阅",
         ));
     }
-    let mut connection = storage::connect(state)?;
-    let draft = storage::get_json(&connection, "draft", draft_id)?
-        .ok_or_else(|| AppError::policy("DRAFT_NOT_FOUND", "待审阅 Draft 不存在"))?;
-    if storage::list_json(&connection, "review_action")?
+    if storage::list_json(&transaction, "review_action")?
         .iter()
         .any(|action| action.get("claimId").and_then(Value::as_str) == Some(draft_id))
     {
@@ -703,28 +952,155 @@ fn review_draft_inner(state: &AppState, input: ReviewDraftInput) -> Result<Value
             "该 Draft 已有 ReviewAction，不能重复审阅",
         ));
     }
-    let transaction = connection.transaction()?;
-    storage::insert_json(&transaction, "review_action", action_id, &input.action)?;
+    let decision = input
+        .decision
+        .as_object()
+        .ok_or_else(|| AppError::policy("REVIEW_ACTION_INVALID", "审阅决策必须是 JSON object"))?;
+    let version_before = draft
+        .get("version")
+        .and_then(Value::as_u64)
+        .ok_or_else(|| AppError::policy("DRAFT_RECORD_INVALID", "Draft 缺少有效 version"))?;
+    let now = chrono::Utc::now().to_rfc3339();
+    let action_id = uuid::Uuid::new_v4().to_string();
+    let mut changed_fields: Vec<&str> = Vec::new();
+    let mut reason = Value::Null;
+    let mut rejection_reason = Value::Null;
+    let mut verified_claim = None;
 
-    if matches!(to_status, "accepted" | "edited") {
-        let verified = input.verified_claim.as_ref().ok_or_else(|| {
-            AppError::policy(
-                "VERIFIED_OBJECT_REQUIRED",
-                "接受或编辑审阅必须产生独立 Verified Claim",
-            )
-        })?;
-        if required_string(verified, "id")? != draft_id
-            || required_string(verified, "paperId")? != required_string(&draft, "paperId")?
-            || required_string(verified, "paperVersionId")?
-                != required_string(&draft, "paperVersionId")?
-            || required_string(verified, "reviewStatus")? != to_status
-            || verified.get("evidenceLinkIds") != draft.get("evidenceLinkIds")
-        {
+    if action_kind == "accept" {
+        if decision.keys().any(|key| key != "action") {
             return Err(AppError::policy(
-                "VERIFIED_OBJECT_MISMATCH",
-                "Verified Claim 必须保留 Draft 身份、论文版本与证据引用",
+                "REVIEW_ACTION_INVALID",
+                "accept 决策不能包含额外字段",
             ));
         }
+    } else if action_kind == "edit_and_accept" {
+        if decision
+            .keys()
+            .any(|key| !matches!(key.as_str(), "action" | "patch"))
+        {
+            return Err(AppError::policy(
+                "REVIEW_ACTION_INVALID",
+                "edit_and_accept 决策包含无效字段",
+            ));
+        }
+        let patch = decision
+            .get("patch")
+            .and_then(Value::as_object)
+            .filter(|patch| !patch.is_empty())
+            .ok_or_else(|| {
+                AppError::policy("REVIEW_PATCH_REQUIRED", "编辑并接受必须包含非空 patch")
+            })?;
+        if patch
+            .keys()
+            .any(|field| !REVIEW_EDITABLE_FIELDS.contains(&field.as_str()))
+        {
+            return Err(AppError::policy(
+                "REVIEW_PATCH_INVALID",
+                "patch 只能修改允许人工审阅的 Claim 字段",
+            ));
+        }
+        changed_fields = REVIEW_EDITABLE_FIELDS
+            .iter()
+            .copied()
+            .filter(|field| patch.contains_key(*field))
+            .collect();
+    } else {
+        if decision
+            .keys()
+            .any(|key| !matches!(key.as_str(), "action" | "rejectionReason" | "reason"))
+        {
+            return Err(AppError::policy(
+                "REVIEW_ACTION_INVALID",
+                "reject 决策包含无效字段",
+            ));
+        }
+        let rejected_for = required_string(&input.decision, "rejectionReason")?;
+        if !matches!(
+            rejected_for,
+            "inaccurate"
+                | "no_evidence"
+                | "over_inference"
+                | "duplicate"
+                | "no_value"
+                | "role_wrong"
+                | "other"
+        ) {
+            return Err(AppError::policy(
+                "REJECTION_REASON_INVALID",
+                "rejectionReason 无效",
+            ));
+        }
+        rejection_reason = Value::String(rejected_for.to_owned());
+        reason = decision.get("reason").cloned().unwrap_or(Value::Null);
+        if !reason.is_null() && !reason.is_string() {
+            return Err(AppError::policy(
+                "REJECTION_REASON_INVALID",
+                "reason 必须是字符串或 null",
+            ));
+        }
+    }
+
+    if matches!(to_status, "accepted" | "edited") {
+        let mut verified = draft.clone();
+        let verified_object = verified.as_object_mut().ok_or_else(|| {
+            AppError::policy("DRAFT_RECORD_INVALID", "Draft 记录必须是 JSON object")
+        })?;
+        if action_kind == "edit_and_accept" {
+            let patch = decision
+                .get("patch")
+                .and_then(Value::as_object)
+                .expect("validated patch");
+            for field in REVIEW_EDITABLE_FIELDS {
+                if let Some(value) = patch.get(field) {
+                    verified_object.insert(field.to_owned(), value.clone());
+                }
+            }
+            if matches!(
+                verified_object.get("originalAiDraft"),
+                None | Some(Value::Null)
+            ) {
+                verified_object.insert("originalAiDraft".to_owned(), snapshot_ai_draft(&draft)?);
+            }
+        }
+        verified_object.insert(
+            "reviewStatus".to_owned(),
+            Value::String(to_status.to_owned()),
+        );
+        verified_object.insert("version".to_owned(), json!(version_before + 1));
+        verified_object.insert("updatedAt".to_owned(), Value::String(now.clone()));
+        verified_object.insert(
+            "reviewedBy".to_owned(),
+            Value::String("local-user".to_owned()),
+        );
+        verified_object.insert("reviewedAt".to_owned(), Value::String(now.clone()));
+        validate_reviewed_claim(&transaction, &verified)?;
+        verified_claim = Some(verified);
+    }
+
+    let original_ai_draft_preserved = verified_claim
+        .as_ref()
+        .and_then(|claim| claim.get("originalAiDraft"))
+        .is_some_and(|value| !value.is_null());
+    let review_action = json!({
+        "id": action_id,
+        "eventType": "claim_review_transition",
+        "claimId": draft_id,
+        "actorId": "local-user",
+        "occurredAt": now,
+        "action": action_kind,
+        "fromStatus": "draft",
+        "toStatus": to_status,
+        "claimVersionBefore": version_before,
+        "claimVersionAfter": version_before + 1,
+        "changedFields": changed_fields,
+        "reason": reason,
+        "rejectionReason": rejection_reason,
+        "originalAiDraftPreserved": original_ai_draft_preserved,
+    });
+    storage::insert_json(&transaction, "review_action", &action_id, &review_action)?;
+
+    if let Some(verified) = &verified_claim {
         storage::insert_json(&transaction, "verified_claim", draft_id, verified)?;
         storage::audit(
             &transaction,
@@ -734,12 +1110,6 @@ fn review_draft_inner(state: &AppState, input: ReviewDraftInput) -> Result<Value
             &json!({"reviewActionId": action_id}),
         )?;
     } else {
-        if input.verified_claim.is_some() {
-            return Err(AppError::policy(
-                "REJECTED_CLAIM_CANNOT_VERIFY",
-                "Rejected 审阅不能附带 Verified Claim",
-            ));
-        }
         storage::audit(
             &transaction,
             "ClaimRejected",
@@ -749,11 +1119,15 @@ fn review_draft_inner(state: &AppState, input: ReviewDraftInput) -> Result<Value
         )?;
     }
     transaction.commit()?;
-    Ok(input.action)
+    Ok(review_action)
 }
 
 #[tauri::command(rename_all = "camelCase")]
 pub fn save_judgment(state: State<'_, AppState>, judgment: Value) -> Result<Value, AppError> {
+    save_judgment_inner(&state, judgment)
+}
+
+fn save_judgment_inner(state: &AppState, judgment: Value) -> Result<Value, AppError> {
     let id = required_string(&judgment, "id")?;
     let paper_id = required_string(&judgment, "paperId")?;
     let paper_version_id = required_string(&judgment, "paperVersionId")?;
@@ -782,7 +1156,8 @@ pub fn save_judgment(state: State<'_, AppState>, judgment: Value) -> Result<Valu
         ));
     }
 
-    let connection = storage::connect(&state)?;
+    let mut connection = storage::connect(state)?;
+    let transaction = connection.transaction()?;
     let mut referenced_claim_ids = Vec::new();
     for key in keys {
         let section = sections
@@ -799,8 +1174,8 @@ pub fn save_judgment(state: State<'_, AppState>, judgment: Value) -> Result<Valu
                 )
             })?;
         for claim_id in claim_ids.iter().filter_map(Value::as_str) {
-            let verified =
-                storage::get_json(&connection, "verified_claim", claim_id)?.ok_or_else(|| {
+            let verified = storage::get_json(&transaction, "verified_claim", claim_id)?
+                .ok_or_else(|| {
                     AppError::policy(
                         "JUDGMENT_VERIFIED_CLAIM_REQUIRED",
                         format!("Judgment 引用了不存在的 Verified Claim {claim_id}"),
@@ -853,9 +1228,9 @@ pub fn save_judgment(state: State<'_, AppState>, judgment: Value) -> Result<Valu
         ));
     }
 
-    storage::upsert_json(&connection, "judgment", id, &judgment)?;
+    storage::upsert_json(&transaction, "judgment", id, &judgment)?;
     storage::audit(
-        &connection,
+        &transaction,
         if status == "complete" {
             "JudgmentCompleted"
         } else {
@@ -865,6 +1240,7 @@ pub fn save_judgment(state: State<'_, AppState>, judgment: Value) -> Result<Valu
         id,
         &json!({"verifiedClaimCount": referenced_claim_ids.len()}),
     )?;
+    transaction.commit()?;
     Ok(judgment)
 }
 
@@ -1637,15 +2013,17 @@ fn save_settings_inner(state: &AppState, settings: Value) -> Result<Value, AppEr
         ));
     }
     validate_openai_settings(&settings)?;
-    let connection = storage::connect(state)?;
-    storage::upsert_json(&connection, "settings", "workspace", &settings)?;
+    let mut connection = storage::connect(state)?;
+    let transaction = connection.transaction()?;
+    storage::upsert_json(&transaction, "settings", "workspace", &settings)?;
     storage::audit(
-        &connection,
+        &transaction,
         "WorkspaceSettingsChanged",
         "settings",
         "workspace",
         &json!({"redacted": true}),
     )?;
+    transaction.commit()?;
     Ok(settings)
 }
 
@@ -1672,11 +2050,12 @@ mod tests {
     use super::{
         contains_secret, credential_status_with, delete_api_key_with, generated_bundle,
         paper_map_context_blocks, persist_generated_drafts, persist_generated_paper_map,
-        request_api_key, required_string, review_draft_inner, save_api_key_with,
-        save_draft_bundles_inner, save_settings_inner, snapshot, update_paper_metadata_inner,
-        validate_anchor_value, validate_document_index, validate_openai_settings,
-        DocumentBlockInput, LocalCredentialStore, LocalDocumentIndexInput, ReviewDraftInput,
-        UpdatePaperMetadataInput, PAPER_MAP_PARSER_VERSION,
+        request_api_key, required_string, review_draft_inner, save_anchor_inner, save_api_key_with,
+        save_draft_bundles_inner, save_judgment_inner, save_settings_inner, snapshot,
+        update_paper_metadata_inner, validate_anchor_value, validate_document_index,
+        validate_openai_settings, DocumentBlockInput, LocalCredentialStore,
+        LocalDocumentIndexInput, ReviewDraftInput, UpdatePaperMetadataInput,
+        PAPER_MAP_PARSER_VERSION,
     };
     use crate::error::AppError;
     use crate::openai::{
@@ -1730,6 +2109,21 @@ mod tests {
         fs::remove_dir_all(root).unwrap();
     }
 
+    fn force_audit_failure(state: &AppState) {
+        storage::connect(state)
+            .unwrap()
+            .execute_batch(
+                r#"
+                CREATE TRIGGER reject_audit_insert
+                BEFORE INSERT ON audit_event
+                BEGIN
+                  SELECT RAISE(ABORT, 'forced audit failure');
+                END;
+                "#,
+            )
+            .unwrap();
+    }
+
     fn generated_draft(claim_text: &str) -> GeneratedDraft {
         GeneratedDraft {
             claim_text: claim_text.to_owned(),
@@ -1754,6 +2148,62 @@ mod tests {
             "pageIndex": 0,
             "selectedText": "A selected reported result."
         })
+    }
+
+    fn insert_review_fixture(state: &AppState) -> serde_json::Value {
+        let anchor = json!({
+            "id": "anchor-1",
+            "paperVersionId": "version-1",
+            "pageIndex": 0,
+            "bboxNorm": [0.1, 0.2, 0.7, 0.3],
+            "selectedText": "The reported result improves by two points.",
+            "textHash": "a".repeat(64),
+            "pdfSha256": format!("sha256:{}", "b".repeat(64)),
+            "parserVersion": "test",
+            "anchorType": "text",
+            "relocationStatus": "exact",
+            "createdBy": "parser"
+        });
+        let link = json!({
+            "id": "link-1",
+            "claimId": "draft-1",
+            "anchorId": "anchor-1",
+            "relation": "support",
+            "supportType": "reported_result",
+            "quotedFragment": "reported result improves",
+            "note": null,
+            "ordinal": 0
+        });
+        let draft = json!({
+            "id": "draft-1",
+            "paperId": "paper-1",
+            "paperVersionId": "version-1",
+            "claimText": "Original immutable Draft",
+            "claimType": "empirical",
+            "epistemicSource": "reported_result",
+            "evidenceLinkIds": ["link-1"],
+            "assumptions": [],
+            "scopeConditions": [],
+            "limitations": [],
+            "confidence": 0.8,
+            "confidenceBasis": ["Selected evidence"],
+            "reviewStatus": "draft",
+            "createdBy": "ai",
+            "needsHumanAttention": false,
+            "modelRunId": "run-1",
+            "userComment": null,
+            "version": 1,
+            "createdAt": "2026-08-05T00:00:00.000Z",
+            "updatedAt": "2026-08-05T00:00:00.000Z",
+            "reviewedBy": null,
+            "reviewedAt": null,
+            "originalAiDraft": null
+        });
+        let connection = storage::connect(state).unwrap();
+        storage::insert_json(&connection, "anchor", "anchor-1", &anchor).unwrap();
+        storage::insert_json(&connection, "evidence_link", "link-1", &link).unwrap();
+        storage::insert_json(&connection, "draft", "draft-1", &draft).unwrap();
+        draft
     }
 
     fn document_block(id: &str, kind: &str) -> DocumentBlockInput {
@@ -1815,6 +2265,84 @@ mod tests {
             "openAiModel": "model-a"
         }))
         .is_err());
+        assert!(validate_openai_settings(&json!({
+            "openAiBaseUrl": "http://localhost:11434/v1",
+            "openAiModel": "model-a"
+        }))
+        .is_ok());
+        assert!(validate_openai_settings(&json!({
+            "openAiBaseUrl": "http://192.168.1.20:11434/v1",
+            "openAiModel": "model-a"
+        }))
+        .is_err());
+    }
+
+    #[test]
+    fn entity_writes_roll_back_when_their_audit_insert_fails() {
+        let anchor_state = test_state();
+        force_audit_failure(&anchor_state);
+        let anchor = json!({
+            "id": "anchor-atomic",
+            "paperVersionId": "version-1",
+            "pageIndex": 0,
+            "bboxNorm": [0.1, 0.2, 0.7, 0.3],
+            "selectedText": "Evidence text",
+            "textHash": "a".repeat(64),
+            "pdfSha256": format!("sha256:{}", "b".repeat(64)),
+            "anchorType": "text",
+            "createdBy": "parser"
+        });
+        assert!(save_anchor_inner(&anchor_state, anchor).is_err());
+        let connection = storage::connect(&anchor_state).unwrap();
+        assert!(storage::get_json(&connection, "anchor", "anchor-atomic")
+            .unwrap()
+            .is_none());
+        drop(connection);
+        remove_test_state(&anchor_state);
+
+        let judgment_state = test_state();
+        force_audit_failure(&judgment_state);
+        let empty_section = json!({"text": "", "verifiedClaimIds": []});
+        let judgment = json!({
+            "id": "judgment-atomic",
+            "paperId": "paper-1",
+            "paperVersionId": "version-1",
+            "sections": {
+                "judgment": empty_section,
+                "reasoning": empty_section,
+                "supportingEvidence": empty_section,
+                "counterEvidence": empty_section,
+                "uncertainties": empty_section,
+                "nextValidation": empty_section
+            },
+            "status": "draft",
+            "createdBy": "user",
+            "updatedAt": "2026-08-05T00:00:00.000Z",
+            "completedAt": null
+        });
+        assert!(save_judgment_inner(&judgment_state, judgment).is_err());
+        let connection = storage::connect(&judgment_state).unwrap();
+        assert!(
+            storage::get_json(&connection, "judgment", "judgment-atomic")
+                .unwrap()
+                .is_none()
+        );
+        drop(connection);
+        remove_test_state(&judgment_state);
+
+        let settings_state = test_state();
+        force_audit_failure(&settings_state);
+        assert!(save_settings_inner(
+            &settings_state,
+            json!({"openAiBaseUrl": "https://provider.example/v1", "openAiModel": "model-a"}),
+        )
+        .is_err());
+        let connection = storage::connect(&settings_state).unwrap();
+        assert!(storage::get_json(&connection, "settings", "workspace")
+            .unwrap()
+            .is_none());
+        drop(connection);
+        remove_test_state(&settings_state);
     }
 
     #[test]
@@ -2092,43 +2620,29 @@ mod tests {
             ("reject", "rejected", false),
         ] {
             let state = test_state();
-            let draft = json!({
-                "id": "draft-1",
-                "paperId": "paper-1",
-                "paperVersionId": "version-1",
-                "claimText": "Original immutable Draft",
-                "reviewStatus": "draft",
-                "evidence": []
-            });
-            let connection = storage::connect(&state).unwrap();
-            storage::insert_json(&connection, "draft", "draft-1", &draft).unwrap();
-            drop(connection);
-
-            let action = json!({
-                "id": format!("action-{kind}"),
-                "claimId": "draft-1",
-                "fromStatus": "draft",
-                "toStatus": to_status,
-                "action": kind
-            });
-            let verified_claim = creates_verified.then(|| {
-                json!({
-                    "id": "draft-1",
-                    "paperId": "paper-1",
-                    "paperVersionId": "version-1",
-                    "claimText": if kind == "edit_and_accept" { "Edited Verified Claim" } else { "Original immutable Draft" },
-                    "reviewStatus": to_status,
-                    "evidence": []
-                })
-            });
-            review_draft_inner(
+            let draft = insert_review_fixture(&state);
+            let decision = match kind {
+                "accept" => json!({"action": "accept"}),
+                "edit_and_accept" => json!({
+                    "action": "edit_and_accept",
+                    "patch": {"claimText": "Edited Verified Claim"}
+                }),
+                "reject" => json!({
+                    "action": "reject",
+                    "rejectionReason": "other",
+                    "reason": "Not useful"
+                }),
+                _ => unreachable!(),
+            };
+            let review_action = review_draft_inner(
                 &state,
                 ReviewDraftInput {
-                    action,
-                    verified_claim,
+                    draft_id: "draft-1".to_owned(),
+                    decision,
                 },
             )
             .unwrap();
+            assert_eq!(review_action["toStatus"], to_status);
 
             let connection = storage::connect(&state).unwrap();
             assert_eq!(
@@ -2149,58 +2663,98 @@ mod tests {
                     .unwrap()["claimText"],
                 "Original immutable Draft"
             );
+            assert_eq!(
+                storage::get_json(&connection, "draft", "draft-1")
+                    .unwrap()
+                    .unwrap(),
+                draft
+            );
+            if creates_verified {
+                let verified = storage::get_json(&connection, "verified_claim", "draft-1")
+                    .unwrap()
+                    .unwrap();
+                assert_eq!(verified["reviewStatus"], to_status);
+                assert_eq!(verified["modelRunId"], "run-1");
+                assert_eq!(verified["evidenceLinkIds"], json!(["link-1"]));
+                assert_eq!(
+                    verified["claimText"],
+                    if kind == "edit_and_accept" {
+                        "Edited Verified Claim"
+                    } else {
+                        "Original immutable Draft"
+                    }
+                );
+                if kind == "edit_and_accept" {
+                    assert_eq!(verified["originalAiDraft"]["claimText"], draft["claimText"]);
+                }
+            }
             drop(connection);
             remove_test_state(&state);
         }
     }
 
     #[test]
-    fn duplicate_review_action_is_rejected() {
+    fn review_accepts_the_domain_external_metadata_source() {
         let state = test_state();
+        let mut draft = insert_review_fixture(&state);
+        draft["epistemicSource"] = json!("external_metadata");
         let connection = storage::connect(&state).unwrap();
-        storage::insert_json(
-            &connection,
-            "draft",
-            "draft-1",
-            &json!({
-                "id": "draft-1",
-                "paperId": "paper-1",
-                "paperVersionId": "version-1",
-                "claimText": "Original immutable Draft",
-                "reviewStatus": "draft",
-                "evidence": []
-            }),
-        )
-        .unwrap();
+        storage::upsert_json(&connection, "draft", "draft-1", &draft).unwrap();
         drop(connection);
 
-        let input = |id: &str| ReviewDraftInput {
-            action: json!({
-                "id": id,
-                "claimId": "draft-1",
-                "fromStatus": "draft",
-                "toStatus": "rejected",
-                "action": "reject"
-            }),
-            verified_claim: None,
-        };
-        assert!(review_draft_inner(
+        review_draft_inner(
             &state,
             ReviewDraftInput {
-                action: json!({
-                    "id": "mismatched-action",
-                    "claimId": "draft-1",
-                    "fromStatus": "draft",
-                    "toStatus": "edited",
-                    "action": "accept"
-                }),
-                verified_claim: None,
+                draft_id: "draft-1".to_owned(),
+                decision: json!({"action": "accept"}),
             },
         )
-        .is_err());
-        review_draft_inner(&state, input("action-1")).unwrap();
-        assert!(review_draft_inner(&state, input("action-2")).is_err());
+        .unwrap();
+
+        let connection = storage::connect(&state).unwrap();
+        let verified = storage::get_json(&connection, "verified_claim", "draft-1")
+            .unwrap()
+            .unwrap();
+        assert_eq!(verified["epistemicSource"], "external_metadata");
+        drop(connection);
         remove_test_state(&state);
+    }
+
+    #[test]
+    fn duplicate_review_action_is_rejected() {
+        let state = test_state();
+        insert_review_fixture(&state);
+
+        let input = || ReviewDraftInput {
+            draft_id: "draft-1".to_owned(),
+            decision: json!({
+                "action": "reject",
+                "rejectionReason": "other",
+                "reason": null
+            }),
+        };
+        let error = review_draft_inner(
+            &state,
+            ReviewDraftInput {
+                draft_id: "draft-1".to_owned(),
+                decision: json!({"action": "accept", "verifiedClaim": {}}),
+            },
+        )
+        .unwrap_err();
+        assert!(error.to_string().starts_with("REVIEW_ACTION_INVALID:"));
+        review_draft_inner(&state, input()).unwrap();
+        assert!(review_draft_inner(&state, input()).is_err());
+        remove_test_state(&state);
+    }
+
+    #[test]
+    fn review_input_rejects_frontend_supplied_authoritative_objects() {
+        let payload = json!({
+            "draftId": "draft-1",
+            "decision": {"action": "accept"},
+            "verifiedClaim": {"id": "draft-1"}
+        });
+        assert!(serde_json::from_value::<ReviewDraftInput>(payload).is_err());
     }
 
     #[test]

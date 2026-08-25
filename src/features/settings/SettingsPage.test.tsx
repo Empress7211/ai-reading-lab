@@ -116,6 +116,47 @@ describe('SettingsPage model configuration', () => {
     await waitFor(() => expect(saveSettings).not.toHaveBeenCalled());
   });
 
+  it.each([
+    'http://provider.example/v1',
+    'http://127.example.com/v1',
+  ])('rejects remote HTTP before saving a key or settings: %s', async (baseUrl) => {
+    const repository = nativeRepository();
+    render(<SettingsPage
+      runtimeLabel="Tauri + SQLite · 本机"
+      repository={repository}
+      settings={DEFAULT_WORKSPACE_SETTINGS}
+      onSettingsSaved={() => undefined}
+    />);
+
+    fireEvent.click(screen.getByRole('button', { name: '模型与 API' }));
+    await screen.findByText('未配置');
+    fireEvent.change(screen.getByLabelText('Base URL'), {
+      target: { value: baseUrl },
+    });
+    fireEvent.change(screen.getByLabelText('API Key'), { target: { value: 'test-key' } });
+    fireEvent.change(screen.getByLabelText('模型 ID'), { target: { value: 'model-a' } });
+    fireEvent.click(screen.getByRole('button', { name: '保存配置' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('远程模型服务必须使用 HTTPS');
+    expect(repository.saveOpenAiApiKey).not.toHaveBeenCalled();
+    expect(repository.saveSettings).not.toHaveBeenCalled();
+  });
+
+  it('discloses the explicit full-text Paper Map request separately from AI Drafts', async () => {
+    render(<SettingsPage
+      runtimeLabel="Tauri + SQLite · 本机"
+      repository={nativeRepository()}
+      settings={DEFAULT_WORKSPACE_SETTINGS}
+      onSettingsSaved={() => undefined}
+    />);
+
+    fireEvent.click(screen.getByRole('button', { name: '隐私边界' }));
+
+    expect(screen.getByText('仅发送所选 Anchor 文本和论文标题；结果必须人工审阅')).toBeInTheDocument();
+    expect(screen.getByText('逐篇确认后发送当前论文的结构化正文证据块；结果未审阅')).toBeInTheDocument();
+    expect(screen.getByText(/不发送 PDF 二进制文件.*结构化正文文本/)).toBeInTheDocument();
+  });
+
   it('shows a Tauri string model-list error unchanged', async () => {
     const error = 'OPENAI_MODELS_REQUEST_FAILED: provider returned 401 Unauthorized';
     const repository = nativeRepository({

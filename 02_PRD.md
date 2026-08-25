@@ -1,5 +1,7 @@
 # 02｜产品需求文档（PRD）
 
+> 历史产品探索文档，不是 0.1.0 RC 的当前发布合同。当前约束以 `README.md` 和 `PRODUCT_DIRECTION.md` 为准；Zotero、Git/GitHub、阅读包和跨论文能力仍属未来候选范围。
+
 ## 1. 文档信息
 
 - 产品：PaperWeave（工作名）

@@ -37,6 +37,12 @@ function normalizeBaseUrl(value: string): string {
   if (url.protocol !== 'http:' && url.protocol !== 'https:') {
     throw new Error('Base URL 仅支持 http:// 或 https://。');
   }
+  const loopbackHost = url.hostname === 'localhost'
+    || /^127(?:\.\d{1,3}){3}$/.test(url.hostname)
+    || url.hostname === '[::1]';
+  if (url.protocol === 'http:' && !loopbackHost) {
+    throw new Error('远程模型服务必须使用 HTTPS；HTTP 仅允许 localhost 或回环 IP。');
+  }
   if (url.username || url.password || url.search || url.hash) {
     throw new Error('Base URL 不能包含账号、密码、查询参数或片段。');
   }
@@ -201,7 +207,7 @@ export function SettingsPage({
   return (
     <div className="page">
       <DemoBanner />
-      <PageHeader title="设置" description="配置本地工作区，以及由你主动启用的 OpenAI-compatible Draft 服务。" />
+      <PageHeader title="设置" description="配置本地工作区，以及由你主动启用的 OpenAI-compatible AI 服务。" />
       <div className="settings-layout">
         <nav className="settings-nav" aria-label="设置分类">
           {labels.map(([value, label]) => <button type="button" key={value} className={tab === value ? 'is-active' : ''} aria-current={tab === value ? 'page' : undefined} onClick={() => { setTab(value); setFeedback(null); }}>{label}</button>)}
@@ -213,11 +219,11 @@ export function SettingsPage({
             <StatusRow label="AI Draft" value={credentialStatus?.configured ? `已配置 · ${settings.openAiModel || '尚未选择模型'}` : '未配置 · 人工 Draft 仍可使用'} />
           </SettingsSection>
         ) : tab === 'models' ? (
-          <SettingsSection title="模型与 API" description="支持 OpenAI-compatible Chat Completions；AI 只能生成待人工审阅的 Draft。">
+          <SettingsSection title="模型与 API" description="支持 OpenAI-compatible Chat Completions；AI Draft 必须人工审阅，实验性 Paper Map 是未审阅导航。">
             <form className="model-settings-form" onSubmit={(event) => void saveConfiguration(event)}>
               <div className="field-grid">
                 <label className="field-full" htmlFor="model-provider"><span>Provider</span><input id="model-provider" aria-label="Provider" value="OpenAI Compatible" disabled /></label>
-                <label className="field-full" htmlFor="model-base-url"><span>Base URL</span><input id="model-base-url" aria-label="Base URL" value={baseUrl} onChange={(event) => setBaseUrl(event.target.value)} placeholder="https://api.openai.com/v1" disabled={!nativeRuntime || pendingAction !== null} /><small>请包含服务要求的版本路径，例如 /v1。只有点击“加载模型列表（可选）”时才请求 /models；生成 AI Draft 时才请求 /chat/completions。</small></label>
+                <label className="field-full" htmlFor="model-base-url"><span>Base URL</span><input id="model-base-url" aria-label="Base URL" value={baseUrl} onChange={(event) => setBaseUrl(event.target.value)} placeholder="https://api.openai.com/v1" disabled={!nativeRuntime || pendingAction !== null} /><small>请包含服务要求的版本路径，例如 /v1。只有点击“加载模型列表（可选）”时才请求 /models；生成 AI Draft 或逐篇确认 Paper Map 时才请求 /chat/completions。</small></label>
                 <label className="field-full" htmlFor="model-api-key"><span>API Key</span><input id="model-api-key" aria-label="API Key" type="password" autoComplete="new-password" value={apiKey} onChange={(event) => setApiKey(event.target.value)} placeholder={credentialStatus?.configured ? '已保存在 PaperWeave；输入新值可替换' : '输入自己的 API Key'} disabled={!nativeRuntime || pendingAction !== null} /><small>首次保存后由 PaperWeave 在本机持续使用，不会在每次生成时询问；此处不回显密钥。</small></label>
                 <label className="field-full" htmlFor="model-id"><span>模型 ID</span><input id="model-id" aria-label="模型 ID" list="openai-model-options" value={model} onChange={(event) => setModel(event.target.value)} placeholder="选择已加载模型，或手动填写模型 ID" disabled={!nativeRuntime || pendingAction !== null} /><small>/models 加载失败不代表 /chat/completions 不可用；可以直接手动填写模型 ID。</small></label>
                 <datalist id="openai-model-options">{models.map((item) => <option key={item.id} value={item.id}>{item.ownedBy ?? ''}</option>)}</datalist>
@@ -233,9 +239,10 @@ export function SettingsPage({
             </form>
           </SettingsSection>
         ) : tab === 'privacy' ? (
-          <SettingsSection title="隐私边界" description="只有你主动请求 AI Draft 时，所选 Anchor 文本才会发送到已配置的模型服务。">
-            <StatusRow label="PDF 上传" value="关闭；完整 PDF 不发送" />
-            <StatusRow label="模型请求" value="仅发送所选 Anchor 与论文标题；失败时不生成 Draft" />
+          <SettingsSection title="隐私边界" description="只有你主动发起并确认对应 AI 功能时，相关文本才会发送到已配置的模型服务。">
+            <StatusRow label="AI Draft" value="仅发送所选 Anchor 文本和论文标题；结果必须人工审阅" />
+            <StatusRow label="Paper Map（实验性）" value="逐篇确认后发送当前论文的结构化正文证据块；结果未审阅" />
+            <StatusRow label="PDF 文件" value="不发送 PDF 二进制文件；Paper Map 会发送从 PDF 提取的结构化正文文本" />
             <StatusRow label="本地数据" value="不会自动同步或静默传出设备" />
           </SettingsSection>
         ) : (

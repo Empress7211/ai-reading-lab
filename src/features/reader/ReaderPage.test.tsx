@@ -62,11 +62,11 @@ function renderReader(
 }
 
 describe('Reader persisted review UI', () => {
-  it('opens the evidence-bound paper map as the default reader surface', () => {
+  it('opens Evidence Anchors as the default reader surface', () => {
     renderReader([], vi.fn().mockResolvedValue(undefined), false);
 
-    expect(screen.getByRole('tab', { name: '地图' })).toHaveAttribute('aria-selected', 'true');
-    expect(screen.getByText('AI argument map · evidence bound')).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: /证据/ })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByText('Evidence Anchors')).toBeInTheDocument();
   });
 
   it('exposes structured judgment and real document actions without legacy integrations', () => {
@@ -75,7 +75,7 @@ describe('Reader persisted review UI', () => {
     expect(screen.getByRole('heading', { name: '我的判断' })).toBeInTheDocument();
     expect(screen.getByText('核心判断')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '更多文档操作' }));
-    expect(screen.getByRole('menuitem', { name: '更换 PDF' })).toBeInTheDocument();
+    expect(screen.getByRole('menuitem', { name: '导入另一篇 PDF' })).toBeInTheDocument();
     expect(screen.getByRole('menuitem', { name: '导出 Verified Markdown' })).toBeInTheDocument();
     expect(screen.queryByText(/Zotero/i)).not.toBeInTheDocument();
   });

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { DraftProposal, EvidenceAnchor, EvidenceLink, JudgmentNote, Paper } from '../../domain';
-import { createEmptyJudgmentSections, reviewDraftProposal } from '../../domain';
+import { createEmptyJudgmentSections } from '../../domain';
 import type { BrowserStore, PdfAssetRecord } from '../browserStore';
 import { BrowserWorkspaceRepository } from '../browserWorkspaceRepository';
 import type { WorkspaceSnapshot } from '../types';
@@ -48,16 +48,14 @@ describe('BrowserWorkspaceRepository', () => {
     await first.saveAnchor(anchor);
     const item = bundle();
     await first.saveDraftBundle(item);
-    const reviewed = reviewDraftProposal(item.draft, { action: 'accept' }, {
-      auditId: 'review-1', actorId: 'local-user', occurredAt: '2026-08-05T01:00:00.000Z',
-      anchors: new Map([[anchor.id, anchor]]), evidenceLinks: new Map([[item.evidenceLinks[0].id, item.evidenceLinks[0]]]),
-    });
-    if (reviewed.state !== 'verified') throw new Error('Expected Verified');
-    await first.reviewDraft({ action: reviewed.reviewAction, verifiedClaim: reviewed.verifiedClaim });
+    await first.reviewDraft({ draftId: item.draft.id, decision: { action: 'accept' } });
+    const reviewed = await first.snapshot();
+    const verified = reviewed.verifiedClaims[0];
+    if (!verified) throw new Error('Expected Verified');
     const sections = createEmptyJudgmentSections();
     sections.judgment = {
       text: 'The evidence supports a reviewable conclusion.',
-      verifiedClaimIds: [reviewed.verifiedClaim.id],
+      verifiedClaimIds: [verified.id],
     };
     const judgment: JudgmentNote = {
       id: 'judgment-1', paperId: paper.id, paperVersionId: 'version-1', sections,
@@ -84,17 +82,13 @@ describe('BrowserWorkspaceRepository', () => {
     for (const [index, decision] of decisions.entries()) {
       const item = bundle(index + 1);
       await repository.saveDraftBundle(item);
-      const result = reviewDraftProposal(item.draft, decision, {
-        auditId: `review-${index}`, actorId: 'local-user', occurredAt: `2026-08-05T0${index + 1}:00:00.000Z`,
-        anchors: new Map([[anchor.id, anchor]]), evidenceLinks: new Map([[item.evidenceLinks[0].id, item.evidenceLinks[0]]]),
-      });
-      await repository.reviewDraft({ action: result.reviewAction, ...(result.verifiedClaim ? { verifiedClaim: result.verifiedClaim } : {}) });
+      await repository.reviewDraft({ draftId: item.draft.id, decision });
     }
     const snapshot = await repository.snapshot();
     expect(snapshot.reviewActions.map((action) => action.toStatus)).toEqual(['accepted', 'edited', 'rejected']);
     expect(snapshot.verifiedClaims).toHaveLength(2);
     expect(snapshot.drafts.every((draft) => draft.reviewStatus === 'draft')).toBe(true);
-    await expect(repository.reviewDraft({ action: snapshot.reviewActions[0]! })).rejects.toThrow('不能重复审阅');
+    await expect(repository.reviewDraft({ draftId: 'draft-1', decision: { action: 'accept' } })).rejects.toThrow('不能重复审阅');
   });
 
   it('persists imported PDF bytes and paper metadata in the browser store', async () => {

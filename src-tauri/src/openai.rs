@@ -1,3 +1,4 @@
+use std::net::IpAddr;
 use std::time::Duration;
 
 use reqwest::{Client, Url};
@@ -26,6 +27,22 @@ pub fn normalize_base_url(value: &str) -> Result<String, AppError> {
             "OPENAI_BASE_URL_INVALID",
             "Base URL 仅支持 http:// 或 https://",
         ));
+    }
+    if parsed.scheme() == "http" {
+        let loopback = parsed.host_str().is_some_and(|host| {
+            host.eq_ignore_ascii_case("localhost")
+                || host
+                    .trim_start_matches('[')
+                    .trim_end_matches(']')
+                    .parse::<IpAddr>()
+                    .is_ok_and(|address| address.is_loopback())
+        });
+        if !loopback {
+            return Err(AppError::policy(
+                "OPENAI_BASE_URL_INVALID",
+                "远程模型服务必须使用 HTTPS；HTTP 仅允许 localhost 或回环 IP",
+            ));
+        }
     }
     if !parsed.username().is_empty()
         || parsed.password().is_some()
@@ -531,6 +548,14 @@ mod tests {
         );
         assert!(normalize_base_url("provider.example/v1").is_err());
         assert!(normalize_base_url("https://user:pass@provider.example/v1").is_err());
+        assert_eq!(
+            normalize_base_url("http://localhost:11434/v1/").unwrap(),
+            "http://localhost:11434/v1"
+        );
+        assert!(normalize_base_url("http://127.0.0.1:11434/v1").is_ok());
+        assert!(normalize_base_url("http://[::1]:11434/v1").is_ok());
+        assert!(normalize_base_url("http://provider.example/v1").is_err());
+        assert!(normalize_base_url("http://192.168.1.20:11434/v1").is_err());
     }
 
     #[test]

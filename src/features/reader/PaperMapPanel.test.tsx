@@ -41,12 +41,15 @@ const paperMap: PaperMapArtifact = {
 
 afterEach(cleanup);
 
-function renderPanel(overrides: Partial<React.ComponentProps<typeof PaperMapPanel>> = {}) {
-  const props: React.ComponentProps<typeof PaperMapPanel> = {
+function renderPanelProps(
+  overrides: Partial<React.ComponentProps<typeof PaperMapPanel>> = {},
+): React.ComponentProps<typeof PaperMapPanel> {
+  return {
     paperId: 'paper-1',
     paperVersionId: 'version-1',
     model: 'model-a',
     documentIndex,
+    documentIndexError: null,
     paperMap: null,
     stalePaperMap: false,
     anchors: [],
@@ -55,11 +58,29 @@ function renderPanel(overrides: Partial<React.ComponentProps<typeof PaperMapPane
     onIncludeBlock: vi.fn().mockResolvedValue(undefined),
     ...overrides,
   };
+}
+
+function renderPanel(overrides: Partial<React.ComponentProps<typeof PaperMapPanel>> = {}) {
+  const props = renderPanelProps(overrides);
   render(<PaperMapPanel {...props} />);
   return props;
 }
 
 describe('PaperMapPanel', () => {
+  it('labels every map state as experimental, single-paper, and unreviewed', () => {
+    const { rerender } = render(<PaperMapPanel {...renderPanelProps({ documentIndex: null })} />);
+    expect(screen.getByText('实验性 Paper Map · 仅当前单篇 · AI 生成且未审阅')).toBeInTheDocument();
+    rerender(<PaperMapPanel {...renderPanelProps({ paperMap })} />);
+    expect(screen.getByText('实验性 Paper Map · 仅当前单篇 · AI 生成且未审阅')).toBeInTheDocument();
+  });
+
+  it('shows an index failure instead of an endless loading state', () => {
+    renderPanel({ documentIndex: null, documentIndexError: '第 2 页文本提取失败' });
+
+    expect(screen.getByRole('alert')).toHaveTextContent('全文索引不可用');
+    expect(screen.getByRole('alert')).toHaveTextContent('Paper Map 暂不可生成');
+    expect(screen.queryByText('正在本地建立可回跳的全文索引…')).not.toBeInTheDocument();
+  });
   it('requires an explicit per-paper confirmation before generation', async () => {
     const props = renderPanel();
     const generate = screen.getByRole('button', { name: '生成论证地图' });

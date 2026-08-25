@@ -27,6 +27,7 @@ interface PaperMapPanelProps {
   paperVersionId: string;
   model: string;
   documentIndex: LocalDocumentIndex | null;
+  documentIndexError: string | null;
   paperMap: PaperMapArtifact | null;
   stalePaperMap: boolean;
   anchors: readonly EvidenceAnchor[];
@@ -109,6 +110,7 @@ export function PaperMapPanel({
   paperVersionId,
   model,
   documentIndex,
+  documentIndexError,
   paperMap,
   stalePaperMap,
   anchors,
@@ -170,12 +172,14 @@ export function PaperMapPanel({
 
   return <>
     <header className="panel-intro">
-      <small>AI argument map · evidence bound</small>
+      <small>实验性 Paper Map · 仅当前单篇 · AI 生成且未审阅</small>
       <h2>先看懂论证，再决定怎么读。</h2>
       <p>AI 负责铺出结构；每条证据仍由本地 Block 解析原文、页码与坐标，只有你点击时才回到 PDF。</p>
     </header>
 
-    {!documentIndex ? <div className="paper-map-state" role="status"><LoaderCircle className="spin" size={18} /><div><strong>正在本地建立可回跳的全文索引…</strong><p>索引完成前不会连接模型，也不会发送部分论文。</p></div></div> : null}
+    {!documentIndex && documentIndexError ? <div className="paper-map-state is-stale" role="alert"><AlertTriangle size={18} /><div><strong>全文索引不可用</strong><p>{documentIndexError}；PDF 阅读与 Evidence Anchor 仍可使用，Paper Map 暂不可生成。</p></div></div> : null}
+
+    {!documentIndex && !documentIndexError ? <div className="paper-map-state" role="status"><LoaderCircle className="spin" size={18} /><div><strong>正在本地建立可回跳的全文索引…</strong><p>索引完成前不会连接模型，也不会发送部分论文。</p></div></div> : null}
 
     {documentIndex && stale ? <div className="paper-map-state is-stale" role="alert"><AlertTriangle size={18} /><div><strong>论证地图已过期</strong><p>PDF 版本、解析器或 Block 引用已经变化；旧地图不能回跳或纳入证据，请重新生成。</p></div></div> : null}
 

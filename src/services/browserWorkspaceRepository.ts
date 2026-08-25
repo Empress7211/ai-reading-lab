@@ -8,7 +8,12 @@ import type {
   ReviewAction,
   VerifiedClaim,
 } from '../domain';
-import { assertValidClaim, assertValidJudgment, validateAnchor } from '../domain';
+import {
+  assertValidClaim,
+  assertValidJudgment,
+  reviewDraftProposal,
+  validateAnchor,
+} from '../domain';
 import { createBrowserStore, type BrowserStore, type BrowserStoreOptions } from './browserStore';
 import {
   DEFAULT_WORKSPACE_SETTINGS,
@@ -329,49 +334,31 @@ export class BrowserWorkspaceRepository implements WorkspaceRepository {
   }
 
   async reviewDraft(input: ReviewDraftInput): Promise<ReviewAction> {
+    let savedAction: ReviewAction | null = null;
     await this.#update((state) => {
-      const draft = state.drafts.find((candidate) => candidate.id === input.action.claimId);
+      const draft = state.drafts.find((candidate) => candidate.id === input.draftId);
       if (!draft) throw new Error('待审阅 DraftProposal 不存在。');
       if (state.reviewActions.some((action) => action.claimId === draft.id)) {
         throw new Error('该 DraftProposal 已有 ReviewAction，不能重复审阅。');
       }
-      if (input.action.fromStatus !== 'draft') {
-        throw new Error('ReviewAction 必须从 draft 状态开始。');
-      }
-      const expectedStatus = input.action.action === 'accept'
-        ? 'accepted'
-        : input.action.action === 'edit_and_accept'
-          ? 'edited'
-          : input.action.action === 'reject'
-            ? 'rejected'
-            : null;
-      if (!expectedStatus || input.action.toStatus !== expectedStatus) {
-        throw new Error('ReviewAction 的动作与目标状态不一致。');
-      }
-      if (expectedStatus === 'rejected') {
-        if (input.verifiedClaim) throw new Error('Rejected 审阅不能产生 VerifiedClaim。');
-      } else {
-        const verified = input.verifiedClaim;
-        if (!verified) throw new Error('Accepted 或 Edited 审阅必须产生 VerifiedClaim。');
-        if (
-          verified.id !== draft.id
-          || verified.paperId !== draft.paperId
-          || verified.paperVersionId !== draft.paperVersionId
-          || verified.reviewStatus !== expectedStatus
-          || JSON.stringify(verified.evidenceLinkIds) !== JSON.stringify(draft.evidenceLinkIds)
-        ) {
-          throw new Error('VerifiedClaim 必须保留 Draft 的身份、论文版本与证据引用。');
-        }
-      }
+      const result = reviewDraftProposal(draft, input.decision, {
+        auditId: createId(),
+        actorId: 'local-user',
+        occurredAt: new Date().toISOString(),
+        anchors: new Map(state.anchors.map((anchor) => [anchor.id, anchor])),
+        evidenceLinks: new Map(state.evidenceLinks.map((link) => [link.id, link])),
+      });
+      savedAction = clone(result.reviewAction);
       return {
         ...state,
-        reviewActions: [...state.reviewActions, clone(input.action)],
-        verifiedClaims: input.verifiedClaim
-          ? upsert(state.verifiedClaims, input.verifiedClaim)
+        reviewActions: [...state.reviewActions, clone(result.reviewAction)],
+        verifiedClaims: result.verifiedClaim
+          ? upsert(state.verifiedClaims, result.verifiedClaim)
           : state.verifiedClaims,
       };
     });
-    return clone(input.action);
+    if (!savedAction) throw new Error('ReviewAction 保存失败。');
+    return clone(savedAction);
   }
 
   async saveJudgment(judgment: JudgmentNote): Promise<JudgmentNote> {

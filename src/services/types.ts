@@ -1,5 +1,6 @@
 import type {
   DraftProposal,
+  DraftReviewDecision,
   EvidenceAnchor,
   EvidenceLink,
   JudgmentNote,
@@ -90,8 +91,8 @@ export interface UpdatePaperMetadataInput {
 }
 
 export interface ReviewDraftInput {
-  action: ReviewAction;
-  verifiedClaim?: VerifiedClaim;
+  draftId: string;
+  decision: DraftReviewDecision;
 }
 
 export interface DraftBundle {

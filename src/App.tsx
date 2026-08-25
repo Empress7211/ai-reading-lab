@@ -20,7 +20,6 @@ import type {
 import {
   createEmptyJudgmentSections,
   renderPaperMarkdown,
-  reviewDraftProposal,
 } from './domain';
 import { LibraryPage } from './features/library/LibraryPage';
 import type { LocalPdfAnchor } from './features/LocalPdfViewer';
@@ -314,26 +313,17 @@ export default function App() {
   const reviewLocalDraft = async (draftId: string, decision: DraftReviewDecision) => {
     const current = localDocument;
     if (!current) throw new Error('没有可用的本地论文。');
-    const draft = current.drafts.find((candidate) => candidate.id === draftId);
-    if (!draft) throw new Error(`DraftProposal ${draftId} 不存在。`);
+    if (!current.drafts.some((candidate) => candidate.id === draftId)) {
+      throw new Error(`DraftProposal ${draftId} 不存在。`);
+    }
     if (current.reviewActions.some((action) => action.claimId === draftId)) {
       throw new Error('该 Draft 已完成审阅，不能重复产生 ReviewAction。');
     }
-    const result = reviewDraftProposal(draft, decision, {
-      auditId: crypto.randomUUID(),
-      actorId: 'local-user',
-      occurredAt: new Date().toISOString(),
-      anchors: new Map(current.anchors.map((anchor) => [anchor.id, anchor])),
-      evidenceLinks: new Map(current.evidenceLinks.map((link) => [link.id, link])),
-    });
-    await repository.reviewDraft({
-      action: result.reviewAction,
-      ...(result.verifiedClaim ? { verifiedClaim: result.verifiedClaim } : {}),
-    });
+    const reviewAction = await repository.reviewDraft({ draftId, decision });
     await refreshOpenDocument(current.paper.id);
     pushToast(
-      result.state === 'rejected' ? 'Draft 已驳回' : 'Claim 已验证',
-      result.state === 'rejected'
+      reviewAction.toStatus === 'rejected' ? 'Draft 已驳回' : 'Claim 已验证',
+      reviewAction.toStatus === 'rejected'
         ? 'ReviewAction 已保存；没有产生 Verified Claim。'
         : 'ReviewAction 与 Verified Claim 已分层保存。',
     );
