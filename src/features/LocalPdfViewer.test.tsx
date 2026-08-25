@@ -232,10 +232,59 @@ describe('LocalPdfViewer lifecycle separation', () => {
       onAnchorStatesChange={onAnchorStatesChange}
       onDocumentIndexChange={onDocumentIndexChange}
     />);
-    await waitFor(() => expect(screen.getByRole('button', { name: /Evidence Anchor/ })).toBeInTheDocument());
+    await waitFor(() => expect(document.querySelector('.pdf-anchor-overlay')).toBeInTheDocument());
+    expect(screen.queryByRole('button', { name: /Evidence Anchor/ })).not.toBeInTheDocument();
     expect(pdfMocks.getDocument).toHaveBeenCalledTimes(1);
     expect(pdfMocks.streamTextContent).toHaveBeenCalledTimes(1);
     expect(onDocumentIndexChange.mock.calls.filter(([value]) => value?.pageCount === 1)).toHaveLength(1);
+  });
+
+  it('uses the non-rAF PDF.js render path required by the bundled WKWebView', async () => {
+    pdfMocks.renderPage.mockImplementationOnce((options: { intent?: string }) => ({
+      promise: options.intent === 'print' ? Promise.resolve() : new Promise<void>(() => undefined),
+    }));
+
+    render(<LocalPdfViewer
+      file={localPdfFile()}
+      onAnchorCreate={() => undefined}
+    />);
+
+    expect(await screen.findByText(/全文索引已完成/)).toBeInTheDocument();
+    expect(pdfMocks.renderPage).toHaveBeenCalledWith(expect.objectContaining({ intent: 'print' }));
+  });
+
+  it('keeps 61 precise Anchor fragments visual without exposing repeated controls', async () => {
+    const file = localPdfFile();
+    const fragments = Array.from({ length: 61 }, (_, index) => [
+      0.1,
+      0.01 + index * 0.01,
+      0.7,
+      0.015 + index * 0.01,
+    ] as const);
+    const fragmentedAnchor = anchor({
+      pageIndex: 0,
+      pdfSha256: `sha256:${'0'.repeat(64)}`,
+      rectsNorm: fragments,
+    });
+    const { container } = render(<LocalPdfViewer
+      file={file}
+      anchors={[fragmentedAnchor]}
+      expectedPaperVersionId="version-1"
+      activeAnchorId={fragmentedAnchor.id}
+      onAnchorCreate={() => undefined}
+      onAnchorStatesChange={() => undefined}
+    />);
+
+    await waitFor(() => {
+      expect(container.querySelectorAll('.pdf-anchor-overlay')).toHaveLength(61);
+      expect(container.querySelectorAll('.pdf-anchor-overlay.is-focused')).toHaveLength(61);
+    });
+    expect(screen.queryByRole('button', { name: /Evidence Anchor/ })).not.toBeInTheDocument();
+    for (const overlay of container.querySelectorAll('.pdf-anchor-overlay')) {
+      expect(overlay.tagName).toBe('DIV');
+      expect(overlay).toHaveAttribute('aria-hidden', 'true');
+      expect(overlay).not.toHaveAttribute('tabindex');
+    }
   });
 
   it('keeps the PDF canvas usable when optional full-text indexing fails', async () => {

@@ -520,6 +520,9 @@ export function LocalPdfViewer({
           canvas,
           canvasContext: context,
           viewport,
+          // PDF.js display rendering stalls on requestAnimationFrame in the bundled WKWebView.
+          // Print intent uses PDF.js's non-rAF scheduler while producing the same static canvas.
+          intent: 'print',
           transform:
             outputScale === 1
               ? undefined
@@ -583,13 +586,11 @@ export function LocalPdfViewer({
       if (!pageElement) continue;
       const fragments = anchor.rectsNorm?.length ? anchor.rectsNorm : [anchor.bboxNorm];
       for (const [fragmentIndex, [x0, y0, x1, y1]] of fragments.entries()) {
-        const overlay = document.createElement('button');
-        overlay.type = 'button';
+        const overlay = document.createElement('div');
         overlay.className = `pdf-anchor-overlay${fragmentIndex === 0 ? ' is-first-fragment' : ''}`;
         overlay.dataset.anchorId = anchor.id;
         overlay.dataset.fragmentIndex = String(fragmentIndex);
-        overlay.setAttribute('aria-label', `Evidence Anchor：${anchor.selectedText}`);
-        overlay.title = `第 ${anchor.pageIndex + 1} 页 · ${anchor.selectedText}`;
+        overlay.setAttribute('aria-hidden', 'true');
         overlay.style.left = `${x0 * 100}%`;
         overlay.style.top = `${y0 * 100}%`;
         overlay.style.width = `${(x1 - x0) * 100}%`;
