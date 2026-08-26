@@ -13,8 +13,10 @@ import type {
   PDFDocumentLoadingTask,
   PDFDocumentProxy,
   PDFPageProxy,
+  RenderTask,
   TextContent,
 } from 'pdfjs-dist/types/src/display/api';
+import type { TextLayer } from 'pdfjs-dist';
 import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import type {
   EvidenceAnchor,
@@ -278,6 +280,30 @@ interface PdfSession {
   textContents: Map<number, Promise<TextContent>>;
 }
 
+const PAGE_RENDER_RADIUS = 1;
+
+interface ActivePageRender {
+  page: PDFPageProxy;
+  pageElement: HTMLElement;
+  canvas: HTMLCanvasElement;
+  textLayer: HTMLDivElement;
+  renderTask?: RenderTask;
+  textRenderer?: TextLayer;
+  canvasPromise: Promise<void>;
+}
+
+export function pageNumbersForRenderWindow(
+  pageCount: number,
+  centerPage: number,
+): number[] {
+  const firstPage = Math.max(1, centerPage - PAGE_RENDER_RADIUS);
+  const lastPage = Math.min(pageCount, centerPage + PAGE_RENDER_RADIUS);
+  return Array.from(
+    { length: Math.max(0, lastPage - firstPage + 1) },
+    (_, index) => firstPage + index,
+  );
+}
+
 function pageForSession(session: PdfSession, pageNumber: number): Promise<PDFPageProxy> {
   let page = session.pages.get(pageNumber);
   if (!page) {
@@ -310,6 +336,10 @@ export function LocalPdfViewer({
   const viewerRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const hostRef = useRef<HTMLDivElement>(null);
+  const renderWindowRef = useRef<(pageNumber: number) => void>(() => undefined);
+  const currentPageRef = useRef(1);
+  const lastScrolledAnchorIdRef = useRef<string | null>(null);
+  const lastScrolledBlockIdRef = useRef<string | null>(null);
   const documentIndexRef = useRef<LocalDocumentIndex | null>(null);
   const anchorsRef = useRef(anchors);
   const onAnchorStatesChangeRef = useRef(onAnchorStatesChange);
@@ -333,6 +363,7 @@ export function LocalPdfViewer({
   onAnchorStatesChangeRef.current = onAnchorStatesChange;
   onDocumentIndexChangeRef.current = onDocumentIndexChange;
   onDocumentIndexErrorRef.current = onDocumentIndexError;
+  currentPageRef.current = currentPage;
 
   useEffect(() => {
     const viewer = viewerRef.current;
@@ -359,6 +390,9 @@ export function LocalPdfViewer({
     setPdfHash('');
     setPageCount(0);
     setCurrentPage(1);
+    currentPageRef.current = 1;
+    lastScrolledAnchorIdRef.current = null;
+    lastScrolledBlockIdRef.current = null;
     setIndexProgress(null);
     setIndexError(null);
     documentIndexRef.current = null;
@@ -440,6 +474,8 @@ export function LocalPdfViewer({
           pageNumber,
           textRunsForPage(textContent, baseViewport),
         ));
+        session!.textContents.delete(pageNumber);
+        page.cleanup();
       }
       if (canceled) return;
       const documentIndex: LocalDocumentIndex = {
@@ -470,53 +506,131 @@ export function LocalPdfViewer({
 
   useEffect(() => {
     const host = hostRef.current;
-    if (!host || !session || viewerWidth === 0) return;
+    const scroller = scrollRef.current;
+    if (!host || !scroller || !session || viewerWidth === 0) return;
     const hostElement = host;
+    const scrollElement = scroller;
     let canceled = false;
+    let placeholdersReady = false;
+    let requestedCenterPage = currentPageRef.current;
+    let activeCenterPage = 0;
+    let activeWindowRevision = 0;
+    let scrollListenerInstalled = false;
+    const activeRenders = new Map<number, ActivePageRender>();
+    const textLayerWarnings = new Map<number, string>();
     hostElement.replaceChildren();
     setPending(null);
     setRenderWarning(null);
+    setError(null);
     setRenderState('rendering');
 
-    async function renderPdf() {
-      const warnings: string[] = [];
+    function syncTextLayerWarnings() {
+      if (canceled) return;
+      const warnings = Array.from(textLayerWarnings.entries())
+        .sort(([left], [right]) => left - right)
+        .map(([, message]) => message);
+      setRenderWarning(warnings.length > 0 ? warnings.join('；') : null);
+    }
+
+    function disposePage(pageNumber: number) {
+      const active = activeRenders.get(pageNumber);
+      if (!active) return;
+      activeRenders.delete(pageNumber);
+      active.renderTask?.cancel();
+      active.textRenderer?.cancel();
+      active.canvas.width = 0;
+      active.canvas.height = 0;
+      active.textLayer.replaceChildren();
+      active.canvas.remove();
+      active.textLayer.remove();
+      active.pageElement.setAttribute('aria-busy', 'true');
+      active.page.cleanup();
+      textLayerWarnings.delete(pageNumber);
+      syncTextLayerWarnings();
+    }
+
+    function failRender(reason: unknown) {
+      if (canceled) return;
+      const message = reason instanceof Error ? reason.message : 'PDF 渲染失败。';
+      setRenderState('failed');
+      setError(message);
+      onAnchorStatesChangeRef.current(anchorsRef.current.map((anchor) => ({
+        anchorId: anchor.id,
+        status: 'pdf-corrupt',
+        message: `PDF 损坏或无法解析：${message}`,
+      })));
+    }
+
+    async function createPagePlaceholders() {
+      const firstPage = await pageForSession(session!, 1);
+      if (canceled) return;
+      const baseViewport = firstPage.getViewport({ scale: 1 });
+      const fitWidth = Math.max(320, Math.min(820, viewerWidth - 72));
+      const fitScale = fitWidth / baseViewport.width;
+      const viewport = firstPage.getViewport({
+        scale: Math.max(0.45, Math.min(2.4, fitScale * zoom)),
+      });
       for (let pageNumber = 1; pageNumber <= session!.pdf.numPages; pageNumber += 1) {
-        if (canceled) return;
-        const page = await pageForSession(session!, pageNumber);
-        const baseViewport = page.getViewport({ scale: 1 });
-        const fitWidth = Math.max(320, Math.min(820, viewerWidth - 72));
-        const fitScale = fitWidth / baseViewport.width;
-        const viewport = page.getViewport({
-          scale: Math.max(0.45, Math.min(2.4, fitScale * zoom)),
-        });
         const pageElement = document.createElement('section');
         pageElement.className = 'pdf-live-page';
         pageElement.dataset.pageIndex = String(pageNumber - 1);
         pageElement.style.setProperty('--page-width', `${viewport.width}px`);
         pageElement.style.setProperty('--page-height', `${viewport.height}px`);
         pageElement.setAttribute('aria-label', `PDF 第 ${pageNumber} 页`);
-
-        const canvas = document.createElement('canvas');
-        const outputScale = Math.min(window.devicePixelRatio || 1, 2);
-        canvas.width = Math.floor(viewport.width * outputScale);
-        canvas.height = Math.floor(viewport.height * outputScale);
-        canvas.style.width = `${viewport.width}px`;
-        canvas.style.height = `${viewport.height}px`;
-        const context = canvas.getContext('2d', { alpha: false });
-        if (!context) throw new Error('浏览器无法创建 PDF 画布。');
-
-        const textLayer = document.createElement('div');
-        textLayer.className = 'textLayer';
-        textLayer.style.width = `${viewport.width}px`;
-        textLayer.style.height = `${viewport.height}px`;
+        pageElement.setAttribute('aria-busy', 'true');
 
         const pageLabel = document.createElement('div');
         pageLabel.className = 'pdf-page-label';
         pageLabel.textContent = `${pageNumber} / ${session!.pdf.numPages}`;
-        pageElement.append(canvas, textLayer, pageLabel);
+        pageElement.append(pageLabel);
         hostElement.append(pageElement);
+      }
+    }
 
-        await page.render({
+    async function renderPage(pageNumber: number): Promise<void> {
+      const existing = activeRenders.get(pageNumber);
+      if (existing) return existing.canvasPromise;
+
+      const pageElement = hostElement.querySelector<HTMLElement>(
+        `.pdf-live-page[data-page-index="${pageNumber - 1}"]`,
+      );
+      if (!pageElement) throw new Error(`第 ${pageNumber} 页占位未建立。`);
+      const page = await pageForSession(session!, pageNumber);
+      if (canceled) return;
+      const baseViewport = page.getViewport({ scale: 1 });
+      const fitWidth = Math.max(320, Math.min(820, viewerWidth - 72));
+      const fitScale = fitWidth / baseViewport.width;
+      const viewport = page.getViewport({
+        scale: Math.max(0.45, Math.min(2.4, fitScale * zoom)),
+      });
+      pageElement.style.setProperty('--page-width', `${viewport.width}px`);
+      pageElement.style.setProperty('--page-height', `${viewport.height}px`);
+      const canvas = document.createElement('canvas');
+      const outputScale = Math.min(window.devicePixelRatio || 1, 2);
+      canvas.width = Math.floor(viewport.width * outputScale);
+      canvas.height = Math.floor(viewport.height * outputScale);
+      canvas.style.width = `${viewport.width}px`;
+      canvas.style.height = `${viewport.height}px`;
+      const context = canvas.getContext('2d', { alpha: false });
+      if (!context) throw new Error('浏览器无法创建 PDF 画布。');
+
+      const textLayer = document.createElement('div');
+      textLayer.className = 'textLayer';
+      textLayer.style.width = `${viewport.width}px`;
+      textLayer.style.height = `${viewport.height}px`;
+      pageElement.prepend(canvas, textLayer);
+
+      const active: ActivePageRender = {
+        page,
+        pageElement,
+        canvas,
+        textLayer,
+        canvasPromise: Promise.resolve(),
+      };
+      activeRenders.set(pageNumber, active);
+
+      active.canvasPromise = (async () => {
+        const renderTask = page.render({
           canvas,
           canvasContext: context,
           viewport,
@@ -527,44 +641,123 @@ export function LocalPdfViewer({
             outputScale === 1
               ? undefined
               : [outputScale, 0, 0, outputScale, 0, 0],
-        }).promise.catch((reason: unknown) => {
+        });
+        active.renderTask = renderTask;
+        try {
+          await renderTask.promise;
+        } catch (reason) {
+          if (canceled || activeRenders.get(pageNumber) !== active) {
+            page.cleanup();
+            return;
+          }
           const message = reason instanceof Error ? reason.message : String(reason);
           throw new Error(`第 ${pageNumber} 页画布渲染失败：${message}`);
-        });
-
-        try {
-          const textContent = await textContentForSession(session!, pageNumber);
-          const renderer = new session!.pdfjs.TextLayer({
-            textContentSource: textContent,
-            container: textLayer,
-            viewport,
-          });
-          await renderer.render();
-        } catch (reason) {
-          const message = reason instanceof Error ? reason.message : String(reason);
-          warnings.push(`第 ${pageNumber} 页文本层不可用：${message}`);
+        } finally {
+          delete active.renderTask;
         }
-      }
-      if (canceled) return;
-      setRenderWarning(warnings.length > 0 ? warnings.join('；') : null);
-      setRenderState('ready');
-      setRenderRevision((revision) => revision + 1);
+        if (canceled || activeRenders.get(pageNumber) !== active) return;
+        pageElement.setAttribute('aria-busy', 'false');
+
+        void (async () => {
+          try {
+            const textContent = await textContentForSession(session!, pageNumber);
+            session!.textContents.delete(pageNumber);
+            if (canceled || activeRenders.get(pageNumber) !== active) return;
+            const renderer = new session!.pdfjs.TextLayer({
+              textContentSource: textContent,
+              container: textLayer,
+              viewport,
+            });
+            active.textRenderer = renderer;
+            await renderer.render();
+            if (canceled || activeRenders.get(pageNumber) !== active) return;
+            textLayerWarnings.delete(pageNumber);
+            syncTextLayerWarnings();
+            setRenderRevision((revision) => revision + 1);
+          } catch (reason) {
+            session!.textContents.delete(pageNumber);
+            if (canceled || activeRenders.get(pageNumber) !== active) return;
+            const message = reason instanceof Error ? reason.message : String(reason);
+            textLayerWarnings.set(pageNumber, `第 ${pageNumber} 页文本层不可用：${message}`);
+            syncTextLayerWarnings();
+          }
+        })();
+      })();
+
+      return active.canvasPromise;
     }
 
-    void renderPdf().catch((reason: unknown) => {
+    function requestRenderWindow(centerPage: number) {
+      requestedCenterPage = Math.max(1, Math.min(session!.pdf.numPages, centerPage));
+      if (!placeholdersReady || canceled) return;
+      const pageNumbers = pageNumbersForRenderWindow(
+        session!.pdf.numPages,
+        requestedCenterPage,
+      );
+      if (
+        requestedCenterPage === activeCenterPage
+        && pageNumbers.every((pageNumber) => activeRenders.has(pageNumber))
+      ) return;
+      activeCenterPage = requestedCenterPage;
+      const requestRevision = ++activeWindowRevision;
+      const desiredPages = new Set(pageNumbers);
+      for (const pageNumber of activeRenders.keys()) {
+        if (!desiredPages.has(pageNumber)) disposePage(pageNumber);
+      }
+
+      void Promise.all(pageNumbers.map(renderPage)).then(() => {
+        if (canceled || requestRevision !== activeWindowRevision) return;
+        setRenderState('ready');
+        setRenderRevision((revision) => revision + 1);
+      }).catch((reason: unknown) => {
+        if (canceled || requestRevision !== activeWindowRevision) return;
+        failRender(reason);
+      });
+    }
+
+    function updateCurrentPage() {
+      const pages = Array.from(hostElement.querySelectorAll<HTMLElement>('.pdf-live-page'));
+      if (pages.length === 0) return;
+      const viewportCenter = scrollElement.getBoundingClientRect().top + scrollElement.clientHeight / 2;
+      let closestPage = 1;
+      let closestDistance = Number.POSITIVE_INFINITY;
+      for (const page of pages) {
+        const rect = page.getBoundingClientRect();
+        const distance = Math.abs(rect.top + rect.height / 2 - viewportCenter);
+        if (distance < closestDistance) {
+          closestDistance = distance;
+          closestPage = Number(page.dataset.pageIndex ?? 0) + 1;
+        }
+      }
+      setCurrentPage(closestPage);
+      if (closestPage !== requestedCenterPage) requestRenderWindow(closestPage);
+    }
+
+    renderWindowRef.current = requestRenderWindow;
+
+    void createPagePlaceholders().then(() => {
       if (canceled) return;
-      const message = reason instanceof Error ? reason.message : 'PDF 渲染失败。';
-      setRenderState('failed');
-      setError(message);
-      onAnchorStatesChangeRef.current(anchorsRef.current.map((anchor) => ({
-        anchorId: anchor.id,
-        status: 'pdf-corrupt',
-        message: `PDF 损坏或无法解析：${message}`,
-      })));
-    });
+      placeholdersReady = true;
+      setRenderRevision((revision) => revision + 1);
+      scrollElement.addEventListener('scroll', updateCurrentPage, { passive: true });
+      scrollListenerInstalled = true;
+      requestRenderWindow(requestedCenterPage);
+      if (requestedCenterPage > 1) {
+        hostElement.querySelector<HTMLElement>(
+          `.pdf-live-page[data-page-index="${requestedCenterPage - 1}"]`,
+        )?.scrollIntoView({ behavior: 'auto', block: 'center', inline: 'center' });
+      }
+    }).catch(failRender);
 
     return () => {
       canceled = true;
+      activeWindowRevision += 1;
+      renderWindowRef.current = () => undefined;
+      if (scrollListenerInstalled) {
+        scrollElement.removeEventListener('scroll', updateCurrentPage);
+      }
+      for (const pageNumber of Array.from(activeRenders.keys())) disposePage(pageNumber);
+      hostElement.replaceChildren();
     };
   }, [session, viewerWidth, zoom]);
 
@@ -603,7 +796,11 @@ export function LocalPdfViewer({
 
   useEffect(() => {
     const host = hostRef.current;
-    if (!host || !activeAnchorId) return;
+    if (!host) return;
+    if (!activeAnchorId) {
+      lastScrolledAnchorIdRef.current = null;
+      return;
+    }
     const overlays = Array.from(
       host.querySelectorAll<HTMLElement>('.pdf-anchor-overlay'),
     );
@@ -611,14 +808,21 @@ export function LocalPdfViewer({
     const targets = overlays.filter((overlay) => overlay.dataset.anchorId === activeAnchorId);
     if (targets.length === 0) return;
     for (const target of targets) target.classList.add('is-focused');
-    targets[0]!.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'center' });
+    if (lastScrolledAnchorIdRef.current === activeAnchorId) return;
+    lastScrolledAnchorIdRef.current = activeAnchorId;
+    const pageNumber = Number(targets[0]!.closest<HTMLElement>('.pdf-live-page')?.dataset.pageIndex ?? 0) + 1;
+    renderWindowRef.current(pageNumber);
+    targets[0]!.scrollIntoView({ behavior: 'auto', block: 'center', inline: 'center' });
   }, [activeAnchorId, renderRevision]);
 
   useEffect(() => {
     const host = hostRef.current;
     if (!host) return;
     host.querySelector('.pdf-map-evidence-overlay')?.remove();
-    if (!activeDocumentBlockId) return;
+    if (!activeDocumentBlockId) {
+      lastScrolledBlockIdRef.current = null;
+      return;
+    }
     const block = documentIndexRef.current?.blocks.find(
       (candidate) => candidate.id === activeDocumentBlockId,
     );
@@ -637,33 +841,11 @@ export function LocalPdfViewer({
     overlay.style.width = `${(x1 - x0) * 100}%`;
     overlay.style.height = `${(y1 - y0) * 100}%`;
     pageElement.append(overlay);
-    overlay.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'center' });
+    if (lastScrolledBlockIdRef.current === activeDocumentBlockId) return;
+    lastScrolledBlockIdRef.current = activeDocumentBlockId;
+    renderWindowRef.current(block.page);
+    overlay.scrollIntoView({ behavior: 'auto', block: 'center', inline: 'center' });
   }, [activeDocumentBlockId, renderRevision]);
-
-  useEffect(() => {
-    const scroller = scrollRef.current;
-    const host = hostRef.current;
-    if (!scroller || !host) return;
-    const updateCurrentPage = () => {
-      const pages = Array.from(host.querySelectorAll<HTMLElement>('.pdf-live-page'));
-      if (pages.length === 0) return;
-      const viewportCenter = scroller.getBoundingClientRect().top + scroller.clientHeight / 2;
-      let closestPage = 1;
-      let closestDistance = Number.POSITIVE_INFINITY;
-      for (const page of pages) {
-        const rect = page.getBoundingClientRect();
-        const distance = Math.abs(rect.top + rect.height / 2 - viewportCenter);
-        if (distance < closestDistance) {
-          closestDistance = distance;
-          closestPage = Number(page.dataset.pageIndex ?? 0) + 1;
-        }
-      }
-      setCurrentPage(closestPage);
-    };
-    updateCurrentPage();
-    scroller.addEventListener('scroll', updateCurrentPage, { passive: true });
-    return () => scroller.removeEventListener('scroll', updateCurrentPage);
-  }, [renderRevision]);
 
   const goToPage = (pageNumber: number) => {
     const nextPage = Math.max(1, Math.min(pageCount, pageNumber));
@@ -672,6 +854,7 @@ export function LocalPdfViewer({
     );
     if (!page) return;
     setCurrentPage(nextPage);
+    renderWindowRef.current(nextPage);
     page.scrollIntoView({ behavior: 'smooth', block: 'start', inline: 'center' });
   };
 
