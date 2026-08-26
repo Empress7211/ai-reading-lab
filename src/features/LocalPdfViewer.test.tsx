@@ -234,6 +234,53 @@ describe('LocalPdfViewer lifecycle separation', () => {
     expect(container.querySelectorAll('.pdf-live-page .textLayer')).toHaveLength(2);
   });
 
+  it('hydrates mixed-size and rotated page placeholders with each page viewport', async () => {
+    pdfMocks.getDocument.mockReset();
+    const pageSizes = new Map<number, readonly [number, number]>([
+      [1, [612, 792]],
+      [2, [595.276, 841.89]],
+      [3, [792, 612]],
+      [4, [595.276, 841.89]],
+    ]);
+    pdfMocks.getPage.mockImplementation(async (pageNumber: number) => {
+      const size = pageSizes.get(pageNumber);
+      if (!size) throw new Error(`missing mock page ${pageNumber}`);
+      const [width, height] = size;
+      return {
+        getViewport: ({ scale }: { scale: number }) => ({
+          width: width * scale,
+          height: height * scale,
+          scale,
+          transform: [scale, 0, 0, -scale, 0, height * scale],
+        }),
+        streamTextContent: pdfMocks.streamTextContent,
+        render: pdfMocks.renderPage,
+        cleanup: pdfMocks.cleanupPage,
+      };
+    });
+    pdfMocks.getDocument.mockReturnValue({
+      promise: Promise.resolve({ numPages: 4, getPage: pdfMocks.getPage }),
+      destroy: vi.fn().mockResolvedValue(undefined),
+    });
+
+    const { container } = render(<LocalPdfViewer
+      file={localPdfFile()}
+      onAnchorCreate={() => undefined}
+    />);
+
+    await waitFor(() => {
+      const pages = container.querySelectorAll<HTMLElement>('.pdf-live-page');
+      expect(pages).toHaveLength(4);
+      expect(Number.parseFloat(pages[0]!.style.getPropertyValue('--page-height')))
+        .toBeCloseTo(820 * 792 / 612, 3);
+      expect(Number.parseFloat(pages[1]!.style.getPropertyValue('--page-height')))
+        .toBeCloseTo(820 * 841.89 / 595.276, 3);
+      expect(Number.parseFloat(pages[2]!.style.getPropertyValue('--page-height')))
+        .toBeCloseTo(820 * 612 / 792, 3);
+    });
+    expect(container.querySelectorAll('.pdf-live-page canvas')).toHaveLength(2);
+  });
+
   it('moves the bounded canvas window when paging while preserving placeholders', async () => {
     pdfMocks.getDocument.mockReset();
     installPdfMock({ numPages: 8 });
@@ -255,6 +302,65 @@ describe('LocalPdfViewer lifecycle separation', () => {
     expect(container.querySelector('.pdf-live-page[data-page-index="0"] canvas')).not.toBeInTheDocument();
     expect(container.querySelector('.pdf-live-page[data-page-index="3"] canvas')).toBeInTheDocument();
     expect(pdfMocks.cleanupPage).toHaveBeenCalled();
+  });
+
+  it('does not mount a slow page after a newer far-away render window wins', async () => {
+    pdfMocks.getDocument.mockReset();
+    let resolveSlowPage!: (page: ReturnType<typeof pageForNumber>) => void;
+
+    function pageForNumber(pageNumber: number) {
+      return {
+        getViewport: ({ scale }: { scale: number }) => ({
+          width: 600 * scale,
+          height: 800 * scale,
+          scale,
+          transform: [scale, 0, 0, -scale, 0, 800 * scale],
+        }),
+        streamTextContent: pdfMocks.streamTextContent,
+        render: pdfMocks.renderPage,
+        cleanup: () => pdfMocks.cleanupPage(pageNumber),
+      };
+    }
+
+    const slowPage = new Promise<ReturnType<typeof pageForNumber>>((resolve) => {
+      resolveSlowPage = resolve;
+    });
+    pdfMocks.getPage.mockImplementation((pageNumber: number) => (
+      pageNumber === 2 ? slowPage : Promise.resolve(pageForNumber(pageNumber))
+    ));
+    pdfMocks.getDocument.mockReturnValue({
+      promise: Promise.resolve({ numPages: 86, getPage: pdfMocks.getPage }),
+      destroy: vi.fn().mockResolvedValue(undefined),
+    });
+
+    const farAnchor = anchor({
+      pageIndex: 85,
+      pdfSha256: `sha256:${'0'.repeat(64)}`,
+      rectsNorm: [[0.1, 0.2, 0.7, 0.3]],
+    });
+    const { container } = render(<LocalPdfViewer
+      file={localPdfFile()}
+      anchors={[farAnchor]}
+      expectedPaperVersionId="version-1"
+      activeAnchorId={farAnchor.id}
+      onAnchorCreate={() => undefined}
+    />);
+
+    await waitFor(() => {
+      expect(container.querySelectorAll('.pdf-live-page canvas')).toHaveLength(2);
+      expect(container.querySelector('.pdf-live-page[data-page-index="84"] canvas')).toBeInTheDocument();
+      expect(container.querySelector('.pdf-live-page[data-page-index="85"] canvas')).toBeInTheDocument();
+    });
+
+    resolveSlowPage(pageForNumber(2));
+
+    await waitFor(() => {
+      expect(pdfMocks.cleanupPage.mock.calls.filter(([pageNumber]) => pageNumber === 2))
+        .toHaveLength(2);
+    });
+    expect(container.querySelector('.pdf-live-page[data-page-index="1"] canvas')).not.toBeInTheDocument();
+    expect(container.querySelectorAll('.pdf-live-page canvas')).toHaveLength(2);
+    expect(screen.queryByText('PDF 打开失败')).not.toBeInTheDocument();
   });
 
   it('does not retain raw TextContent after a page leaves the render window', async () => {

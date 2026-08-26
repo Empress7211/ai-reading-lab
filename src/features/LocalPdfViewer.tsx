@@ -517,6 +517,7 @@ export function LocalPdfViewer({
     let activeWindowRevision = 0;
     let scrollListenerInstalled = false;
     const activeRenders = new Map<number, ActivePageRender>();
+    let desiredPages = new Set<number>();
     const textLayerWarnings = new Map<number, string>();
     hostElement.replaceChildren();
     setPending(null);
@@ -561,15 +562,19 @@ export function LocalPdfViewer({
       })));
     }
 
+    function viewportForPage(page: PDFPageProxy) {
+      const baseViewport = page.getViewport({ scale: 1 });
+      const fitWidth = Math.max(320, Math.min(820, viewerWidth - 72));
+      const fitScale = fitWidth / baseViewport.width;
+      return page.getViewport({
+        scale: Math.max(0.45, Math.min(2.4, fitScale * zoom)),
+      });
+    }
+
     async function createPagePlaceholders() {
       const firstPage = await pageForSession(session!, 1);
       if (canceled) return;
-      const baseViewport = firstPage.getViewport({ scale: 1 });
-      const fitWidth = Math.max(320, Math.min(820, viewerWidth - 72));
-      const fitScale = fitWidth / baseViewport.width;
-      const viewport = firstPage.getViewport({
-        scale: Math.max(0.45, Math.min(2.4, fitScale * zoom)),
-      });
+      const viewport = viewportForPage(firstPage);
       for (let pageNumber = 1; pageNumber <= session!.pdf.numPages; pageNumber += 1) {
         const pageElement = document.createElement('section');
         pageElement.className = 'pdf-live-page';
@@ -587,7 +592,21 @@ export function LocalPdfViewer({
       }
     }
 
-    async function renderPage(pageNumber: number): Promise<void> {
+    async function hydratePagePlaceholderSizes() {
+      for (let pageNumber = 2; pageNumber <= session!.pdf.numPages; pageNumber += 1) {
+        const page = await pageForSession(session!, pageNumber);
+        if (canceled) return;
+        const pageElement = hostElement.querySelector<HTMLElement>(
+          `.pdf-live-page[data-page-index="${pageNumber - 1}"]`,
+        );
+        if (!pageElement) return;
+        const viewport = viewportForPage(page);
+        pageElement.style.setProperty('--page-width', `${viewport.width}px`);
+        pageElement.style.setProperty('--page-height', `${viewport.height}px`);
+      }
+    }
+
+    async function renderPage(pageNumber: number, requestRevision: number): Promise<void> {
       const existing = activeRenders.get(pageNumber);
       if (existing) return existing.canvasPromise;
 
@@ -596,13 +615,15 @@ export function LocalPdfViewer({
       );
       if (!pageElement) throw new Error(`第 ${pageNumber} 页占位未建立。`);
       const page = await pageForSession(session!, pageNumber);
-      if (canceled) return;
-      const baseViewport = page.getViewport({ scale: 1 });
-      const fitWidth = Math.max(320, Math.min(820, viewerWidth - 72));
-      const fitScale = fitWidth / baseViewport.width;
-      const viewport = page.getViewport({
-        scale: Math.max(0.45, Math.min(2.4, fitScale * zoom)),
-      });
+      if (
+        canceled
+        || requestRevision !== activeWindowRevision
+        || !desiredPages.has(pageNumber)
+      ) {
+        if (canceled || !desiredPages.has(pageNumber)) page.cleanup();
+        return;
+      }
+      const viewport = viewportForPage(page);
       pageElement.style.setProperty('--page-width', `${viewport.width}px`);
       pageElement.style.setProperty('--page-height', `${viewport.height}px`);
       const canvas = document.createElement('canvas');
@@ -700,13 +721,16 @@ export function LocalPdfViewer({
       ) return;
       activeCenterPage = requestedCenterPage;
       const requestRevision = ++activeWindowRevision;
-      const desiredPages = new Set(pageNumbers);
+      desiredPages = new Set(pageNumbers);
       for (const pageNumber of activeRenders.keys()) {
         if (!desiredPages.has(pageNumber)) disposePage(pageNumber);
       }
 
-      void Promise.all(pageNumbers.map(renderPage)).then(() => {
+      void Promise.all(pageNumbers.map((pageNumber) => renderPage(pageNumber, requestRevision))).then(() => {
         if (canceled || requestRevision !== activeWindowRevision) return;
+        for (const pageNumber of Array.from(activeRenders.keys())) {
+          if (!desiredPages.has(pageNumber)) disposePage(pageNumber);
+        }
         setRenderState('ready');
         setRenderRevision((revision) => revision + 1);
       }).catch((reason: unknown) => {
@@ -738,6 +762,7 @@ export function LocalPdfViewer({
     void createPagePlaceholders().then(() => {
       if (canceled) return;
       placeholdersReady = true;
+      void hydratePagePlaceholderSizes().catch(failRender);
       setRenderRevision((revision) => revision + 1);
       scrollElement.addEventListener('scroll', updateCurrentPage, { passive: true });
       scrollListenerInstalled = true;
